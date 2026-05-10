@@ -95,3 +95,7 @@ See the [docs/](docs/README.md) directory for the full manual:
 - [Capture](docs/capture.md)
 - [CLI Tool](docs/cli.md)
 - [Errors](docs/errors.md)
+
+## If you use this
+
+If you use this it would be really nice if you dropped me a line to let me know, or sent a PR so I can include a link to your application below.
