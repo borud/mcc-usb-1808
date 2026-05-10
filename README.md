@@ -1,6 +1,6 @@
 # mcc-usb-1808
 
-<img src="docs/mascot.png" alt="Go mascot" width="200" align="right">
+![Go mascot](docs/mascot.svg)
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/borud/mcc-usb-1808.svg)](https://pkg.go.dev/github.com/borud/mcc-usb-1808)
 
