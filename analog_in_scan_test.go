@@ -208,9 +208,13 @@ func TestRingStageSize_Invariants(t *testing.T) {
 				t.Errorf("rate=%.0f nCh=%d: size=%d > ringMaxStageSize=%d",
 					rate, nCh, size, ringMaxStageSize)
 			}
-			if size >= MaxPacketSize && size%MaxPacketSize != 0 {
+			if size >= MaxPacketSize && MaxPacketSize%bytesPerScan == 0 && size%MaxPacketSize != 0 {
 				t.Errorf("rate=%.0f nCh=%d: size=%d not aligned to MaxPacketSize=%d",
 					rate, nCh, size, MaxPacketSize)
+			}
+			if size%bytesPerScan != 0 {
+				t.Errorf("rate=%.0f nCh=%d: size=%d not aligned to bytesPerScan=%d",
+					rate, nCh, size, bytesPerScan)
 			}
 		}
 	}
@@ -242,9 +246,13 @@ func FuzzRingStageSize(f *testing.F) {
 			t.Errorf("rate=%g nCh=%d: size=%d > ringMaxStageSize=%d",
 				rate, nCh, size, ringMaxStageSize)
 		}
-		if size >= MaxPacketSize && size%MaxPacketSize != 0 {
+		if size >= MaxPacketSize && MaxPacketSize%bytesPerScan == 0 && size%MaxPacketSize != 0 {
 			t.Errorf("rate=%g nCh=%d: size=%d not aligned to MaxPacketSize",
 				rate, nCh, size)
+		}
+		if size%bytesPerScan != 0 {
+			t.Errorf("rate=%g nCh=%d: size=%d not aligned to bytesPerScan=%d",
+				rate, nCh, size, bytesPerScan)
 		}
 	})
 }

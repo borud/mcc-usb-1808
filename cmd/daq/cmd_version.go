@@ -9,7 +9,7 @@ type versionCmd struct {
 	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
-func (c *versionCmd) Run(app *cli) error {
+func (c *versionCmd) Run(_ *cli) error {
 	if c.Format == "json" {
 		return printJSON(map[string]string{
 			"version":    version,

@@ -232,12 +232,18 @@ func ringStageSize(rate float64, nChannels int) int {
 	if n < 1 {
 		n = 1
 	}
-	totalBytes := n * nChannels * 4
+	bytesPerScan := nChannels * 4
+	totalBytes := n * bytesPerScan
 	if totalBytes > ringMaxStageSize {
 		totalBytes = ringMaxStageSize
 	}
 	if totalBytes >= MaxPacketSize {
 		totalBytes = (totalBytes / MaxPacketSize) * MaxPacketSize
+	}
+	// Align to scan boundary so no frame splits across transfers.
+	totalBytes = (totalBytes / bytesPerScan) * bytesPerScan
+	if totalBytes < bytesPerScan {
+		totalBytes = bytesPerScan
 	}
 	return totalBytes
 }
@@ -662,9 +668,20 @@ func (d *Device) scanRawAsync(ctx context.Context, cfg AnalogInScanConfig, ar tr
 		return
 	}
 
+	ctxDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = d.StopAnalogInScan()
+			ring.Stop()
+		case <-ctxDone:
+		}
+	}()
+
 	defer func() {
-		ring.Stop()
+		close(ctxDone)
 		_ = d.StopAnalogInScan()
+		ring.Stop()
 	}()
 
 	total := int(cfg.Count)
@@ -673,6 +690,14 @@ func (d *Device) scanRawAsync(ctx context.Context, cfg AnalogInScanConfig, ar tr
 
 	for result := range ring.Results() {
 		if result.Err != nil {
+			if sd, se := d.transport.ControlIn(cmdStatus, 0, 0, 2); se == nil {
+				if Status(wire.Uint16LE(sd)).AInScanOverrun() {
+					_ = d.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
+					_ = d.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
+					yield(nil, ErrScanOverrun)
+					return
+				}
+			}
 			yield(nil, result.Err)
 			return
 		}
@@ -740,9 +765,20 @@ func (d *Device) scanBulkAsync(ctx context.Context, cfg AnalogInScanConfig, ar t
 		return
 	}
 
+	ctxDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = d.StopAnalogInScan()
+			ring.Stop()
+		case <-ctxDone:
+		}
+	}()
+
 	defer func() {
-		ring.Stop()
+		close(ctxDone)
 		_ = d.StopAnalogInScan()
+		ring.Stop()
 	}()
 
 	total := int(cfg.Count)
@@ -750,6 +786,14 @@ func (d *Device) scanBulkAsync(ctx context.Context, cfg AnalogInScanConfig, ar t
 
 	for result := range ring.Results() {
 		if result.Err != nil {
+			if sd, se := d.transport.ControlIn(cmdStatus, 0, 0, 2); se == nil {
+				if Status(wire.Uint16LE(sd)).AInScanOverrun() {
+					_ = d.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
+					_ = d.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
+					yield(nil, ErrScanOverrun)
+					return
+				}
+			}
 			yield(nil, result.Err)
 			return
 		}
