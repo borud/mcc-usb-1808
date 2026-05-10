@@ -172,6 +172,17 @@ func (d *Device) ReadAnalogInScan(ctx context.Context, nScans int) ([]float64, e
 // transfers can time out on macOS/libusb; 64 KiB is safe across platforms.
 const maxTransferBytes = 64 * 1024
 
+// ringTransferCount is the number of async bulk transfers in the ring.
+// At max rate (200kHz × 8ch × 4B = 6.4 MB/s) with 16KB buffers, each
+// transfer fills in ~2.5ms; 32 transfers keeps ~80ms armed at the USB
+// controller.
+const ringTransferCount = 32
+
+// ringMaxStageSize is the maximum buffer size per async ring transfer.
+// Smaller than the 64KB used for sync transfers because async transfers
+// are resubmitted immediately from the completion callback.
+const ringMaxStageSize = 16 * 1024
+
 // scanBatchSize computes the number of scans to read per USB bulk transfer.
 // Targets ~100ms worth of data per read to keep ahead of the device FIFO,
 // capped at maxTransferBytes. The result is aligned to MaxPacketSize (512)
@@ -209,6 +220,26 @@ func scanReadTimeout(rate float64, nScans int) time.Duration {
 		timeout = usbTimeout
 	}
 	return timeout
+}
+
+// ringStageSize computes the buffer size in bytes for each async ring
+// transfer. Targets ~10ms of data, aligned to MaxPacketSize (512) for
+// efficient USB bulk transfers, capped at ringMaxStageSize (16KB).
+// At low rates where 10ms of data is less than one packet, returns the
+// raw byte count (the device will send short packets).
+func ringStageSize(rate float64, nChannels int) int {
+	n := int(rate * 0.01) // 10ms of data (in scans)
+	if n < 1 {
+		n = 1
+	}
+	totalBytes := n * nChannels * 4
+	if totalBytes > ringMaxStageSize {
+		totalBytes = ringMaxStageSize
+	}
+	if totalBytes >= MaxPacketSize {
+		totalBytes = (totalBytes / MaxPacketSize) * MaxPacketSize
+	}
+	return totalBytes
 }
 
 // ScanAnalogIn returns a pull-based iterator that reads analog input scan data
@@ -607,26 +638,27 @@ func (d *Device) scanRawAsync(ctx context.Context, cfg AnalogInScanConfig, ar tr
 	}
 
 	nCh := len(cfg.Channels)
-	batch := scanBatchSize(cfg.Rate, nCh)
-	batchBytes := batch * nCh * 4
-	readTimeout := scanReadTimeout(cfg.Rate, batch)
+	bufSize := ringStageSize(cfg.Rate, nCh)
 
 	_ = d.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
 
-	if err := d.StartAnalogInScan(cfg); err != nil {
-		yield(nil, err)
-		return
-	}
-
+	// Submit all transfers BEFORE starting the scan. The transfers sit
+	// armed at the USB controller until the device begins producing
+	// data, eliminating the startup gap.
 	depth := cfg.PipelineDepth
 	if depth <= 0 {
 		depth = DefaultPipelineDepth
 	}
 
-	ring, err := ar.NewBulkRing(epBulkIn, batchBytes, 8, depth, uint(readTimeout.Milliseconds()))
+	ring, err := ar.NewBulkRing(epBulkIn, bufSize, ringTransferCount, depth, 0)
 	if err != nil {
 		yield(nil, err)
-		_ = d.StopAnalogInScan()
+		return
+	}
+
+	if err := d.StartAnalogInScan(cfg); err != nil {
+		ring.Stop()
+		yield(nil, err)
 		return
 	}
 
@@ -684,26 +716,27 @@ func (d *Device) scanBulkAsync(ctx context.Context, cfg AnalogInScanConfig, ar t
 
 	nCh := len(cfg.Channels)
 	frameSize := nCh * 4
-	batch := scanBatchSize(cfg.Rate, nCh)
-	batchBytes := batch * nCh * 4
-	readTimeout := scanReadTimeout(cfg.Rate, batch)
+	bufSize := ringStageSize(cfg.Rate, nCh)
 
 	_ = d.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
 
-	if err := d.StartAnalogInScan(cfg); err != nil {
-		yield(nil, err)
-		return
-	}
-
+	// Submit all transfers BEFORE starting the scan. The transfers sit
+	// armed at the USB controller until the device begins producing
+	// data, eliminating the startup gap.
 	depth := cfg.PipelineDepth
 	if depth <= 0 {
 		depth = DefaultPipelineDepth
 	}
 
-	ring, err := ar.NewBulkRing(epBulkIn, batchBytes, 8, depth, uint(readTimeout.Milliseconds()))
+	ring, err := ar.NewBulkRing(epBulkIn, bufSize, ringTransferCount, depth, 0)
 	if err != nil {
 		yield(nil, err)
-		_ = d.StopAnalogInScan()
+		return
+	}
+
+	if err := d.StartAnalogInScan(cfg); err != nil {
+		ring.Stop()
+		yield(nil, err)
 		return
 	}
 
