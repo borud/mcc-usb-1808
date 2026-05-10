@@ -14,6 +14,7 @@ type analogReadCmd struct {
 	Raw      bool   `help:"Output raw 18-bit ADC values." default:"false"`
 	Repeat   int    `help:"Number of reads." default:"1"`
 	Interval string `help:"Delay between repeats." default:"1s"`
+	Format   string `help:"Output format (${enum})." default:"text" enum:"text,csv,json"`
 }
 
 func (c *analogReadCmd) Run(app *cli) error {
@@ -57,7 +58,7 @@ func (c *analogReadCmd) Run(app *cli) error {
 			if err != nil {
 				return fmt.Errorf("read: %w", err)
 			}
-			if err := c.outputRaw(app, channels, raw); err != nil {
+			if err := c.outputRaw(channels, raw); err != nil {
 				return err
 			}
 		} else {
@@ -65,7 +66,7 @@ func (c *analogReadCmd) Run(app *cli) error {
 			if err != nil {
 				return fmt.Errorf("read: %w", err)
 			}
-			if err := c.outputVolts(app, channels, ranges, volts); err != nil {
+			if err := c.outputVolts(channels, ranges, volts); err != nil {
 				return err
 			}
 		}
@@ -73,8 +74,8 @@ func (c *analogReadCmd) Run(app *cli) error {
 	return nil
 }
 
-func (c *analogReadCmd) outputVolts(app *cli, channels []int, ranges []usb1808.Range, volts [usb1808.NumAInChannels]float64) error {
-	switch app.Format {
+func (c *analogReadCmd) outputVolts(channels []int, ranges []usb1808.Range, volts [usb1808.NumAInChannels]float64) error {
+	switch c.Format {
 	case "json":
 		entries := make([]map[string]any, len(channels))
 		for i, ch := range channels {
@@ -112,8 +113,8 @@ func (c *analogReadCmd) outputVolts(app *cli, channels []int, ranges []usb1808.R
 	return nil
 }
 
-func (c *analogReadCmd) outputRaw(app *cli, channels []int, raw [usb1808.NumAInChannels]uint32) error {
-	switch app.Format {
+func (c *analogReadCmd) outputRaw(channels []int, raw [usb1808.NumAInChannels]uint32) error {
+	switch c.Format {
 	case "json":
 		entries := make([]map[string]any, len(channels))
 		for i, ch := range channels {

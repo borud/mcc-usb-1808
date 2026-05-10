@@ -102,10 +102,10 @@ func (t *LibUSBTransport) ControlIn(request uint8, wValue, wIndex uint16, length
 }
 
 // BulkRead implements Transport.
+// libusb 1.0 is thread-safe so no mutex is needed for bulk transfers.
+// This allows concurrent bulk reads while control transfers proceed
+// independently on the default endpoint.
 func (t *LibUSBTransport) BulkRead(endpoint uint8, length int, timeout time.Duration) ([]byte, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	buf := make([]byte, length)
 	var transferred C.int
 
@@ -123,11 +123,26 @@ func (t *LibUSBTransport) BulkRead(endpoint uint8, length int, timeout time.Dura
 	return buf[:int(transferred)], nil
 }
 
+// BulkReadInto implements Transport.
+// Like BulkRead but reads into a caller-provided buffer to avoid allocation.
+func (t *LibUSBTransport) BulkReadInto(endpoint uint8, buf []byte, timeout time.Duration) (int, error) {
+	var transferred C.int
+	rc := C.libusb_bulk_transfer(
+		t.handle,
+		C.uchar(endpoint),
+		(*C.uchar)(unsafe.Pointer(&buf[0])),
+		C.int(len(buf)),
+		&transferred,
+		C.uint(timeout.Milliseconds()),
+	)
+	if rc != 0 {
+		return int(transferred), fmt.Errorf("bulk read EP 0x%02x: %s", endpoint, C.GoString(C.libusb_strerror(rc)))
+	}
+	return int(transferred), nil
+}
+
 // BulkWrite implements Transport.
 func (t *LibUSBTransport) BulkWrite(endpoint uint8, data []byte, timeout time.Duration) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	var dataPtr *C.uchar
 	if len(data) > 0 {
 		dataPtr = (*C.uchar)(unsafe.Pointer(&data[0]))
@@ -146,6 +161,11 @@ func (t *LibUSBTransport) BulkWrite(endpoint uint8, data []byte, timeout time.Du
 		return int(transferred), fmt.Errorf("bulk write EP 0x%02x: %s", endpoint, C.GoString(C.libusb_strerror(rc)))
 	}
 	return int(transferred), nil
+}
+
+// NewBulkRing implements AsyncBulkReader.
+func (t *LibUSBTransport) NewBulkRing(endpoint uint8, bufSize, count, depth int, timeoutMs uint) (*BulkRing, error) {
+	return NewBulkRing(t.ctx, t.handle, endpoint, bufSize, count, depth, timeoutMs)
 }
 
 // Close implements Transport.

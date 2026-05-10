@@ -74,7 +74,7 @@ func NewReader(r io.Reader) (*Reader, error) {
 	case RawUint32:
 		frame.raw = make([]uint32, numCh)
 		frame.floats = make([]float64, numCh)
-	case CalibratedFloat64:
+	case calibratedFloat64:
 		frame.floats = make([]float64, numCh)
 	}
 
@@ -116,7 +116,7 @@ func (rd *Reader) ReadFrame() (*Frame, error) {
 		for i := range rd.numCh {
 			rd.frame.raw[i] = binary.LittleEndian.Uint32(rd.buf[i*4:])
 		}
-	case CalibratedFloat64:
+	case calibratedFloat64:
 		for i := range rd.numCh {
 			rd.frame.floats[i] = math.Float64frombits(binary.LittleEndian.Uint64(rd.buf[i*8:]))
 		}

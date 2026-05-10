@@ -49,7 +49,7 @@ func sampleSize(f DataFormat) (int, error) {
 	switch f {
 	case RawUint32:
 		return 4, nil
-	case CalibratedFloat64:
+	case calibratedFloat64:
 		return 8, nil
 	default:
 		return 0, ErrInvalidFormat

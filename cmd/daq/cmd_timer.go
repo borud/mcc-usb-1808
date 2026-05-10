@@ -86,7 +86,8 @@ func (c *timerStopCmd) Run(app *cli) error {
 // --- status ---
 
 type timerStatusCmd struct {
-	Index int `help:"Timer index (0 or 1)." default:"0"`
+	Index  int    `help:"Timer index (0 or 1)." default:"0"`
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *timerStatusCmd) Run(app *cli) error {
@@ -106,7 +107,7 @@ func (c *timerStatusCmd) Run(app *cli) error {
 		return fmt.Errorf("params: %w", err)
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]any{
 			"index":      c.Index,
 			"enabled":    ctrl&usb1808.TimerEnable != 0,

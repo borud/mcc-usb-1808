@@ -133,14 +133,15 @@ values without voltage conversion.
 
 ### AnalogInScanConfig
 
-| Field         | Type      | Description                              |
-|---------------|-----------|------------------------------------------|
-| `Channels`    | `[]int`   | Scan queue channel selectors (0–12).     |
-| `Rate`        | `float64` | Sample rate in Hz per channel.           |
-| `Count`       | `uint32`  | Total scans. 0 = continuous.             |
-| `RetrigCount` | `uint32`  | Scans per retrigger. 0 = no retrigger.   |
-| `Options`     | `uint8`   | Scan option flags (see below).           |
-| `PacketSize`  | `uint8`   | Samples-1 per USB packet (0xFF = max).   |
+| Field           | Type      | Description                              |
+|-----------------|-----------|------------------------------------------|
+| `Channels`      | `[]int`   | Scan queue channel selectors (0–12).     |
+| `Rate`          | `float64` | Sample rate in Hz per channel.           |
+| `Count`         | `uint32`  | Total scans. 0 = continuous.             |
+| `RetrigCount`   | `uint32`  | Scans per retrigger. 0 = no retrigger.   |
+| `Options`       | `uint8`   | Scan option flags (see below).           |
+| `PacketSize`    | `uint8`   | Samples-1 per USB packet (0xFF = max).   |
+| `PipelineDepth` | `int`     | Read-ahead batches buffered (default 32).|
 
 **Scan option flags:**
 
@@ -173,8 +174,37 @@ raw, err := dev.ReadAnalogInScanRaw(ctx, nChannels, nScans, timeout)
 dev.StopAnalogInScan()
 ```
 
+### High-Throughput Scan APIs
+
+For sustained high-rate capture, use `ScanAnalogInRaw` or `ScanAnalogInBulk`
+instead of `ScanAnalogIn`. These avoid per-sample calibration overhead and use
+a multi-reader USB pipeline.
+
+`ScanAnalogInRaw` yields raw `[]uint32` frames without voltage conversion:
+
+```go
+for frame, err := range dev.ScanAnalogInRaw(ctx, cfg) {
+    // frame is []uint32
+}
+```
+
+`ScanAnalogInBulk` yields raw `[]byte` slices directly from USB bulk
+transfers, with no unpacking. This is the path used by `daq capture`:
+
+```go
+for data, err := range dev.ScanAnalogInBulk(ctx, cfg) {
+    // data is []byte, packed little-endian uint32s
+}
+```
+
+Both APIs use a configurable read-ahead pipeline (`PipelineDepth`, default 32
+batches) with multiple concurrent USB readers to keep the device FIFO drained.
+
 ### Overrun Handling
 
 If the host does not read data fast enough, the device FIFO overruns.
 `ReadAnalogInScanRaw` detects this via the status register and returns
 `ErrScanOverrun` after stopping the scan and clearing the FIFO.
+
+See [High-Rate Capture Troubleshooting](high-rate-capture.md) for tuning
+guidance when overruns occur at high sample rates.

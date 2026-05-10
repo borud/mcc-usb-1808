@@ -95,6 +95,13 @@ func (d *Device) Model() Model {
 	return d.model
 }
 
+// AsyncBulkSupported reports whether the underlying transport supports
+// async bulk transfer rings (true for real hardware, false for mocks).
+func (d *Device) AsyncBulkSupported() bool {
+	_, ok := d.transport.(transport.AsyncBulkReader)
+	return ok
+}
+
 // Close releases the USB device.
 func (d *Device) Close() error {
 	d.mu.Lock()

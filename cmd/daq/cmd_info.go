@@ -2,7 +2,9 @@ package main
 
 import "fmt"
 
-type infoCmd struct{}
+type infoCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *infoCmd) Run(app *cli) error {
 	dev, err := openDevice(app)
@@ -27,7 +29,7 @@ func (c *infoCmd) Run(app *cli) error {
 		return fmt.Errorf("FPGA version: %w", err)
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		info := map[string]any{
 			"model":         model.String(),
 			"serial":        serial,

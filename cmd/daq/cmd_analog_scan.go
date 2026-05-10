@@ -20,9 +20,9 @@ type analogScanCmd struct {
 	Count     int     `help:"Number of scans (0=continuous)." default:"100"`
 	Trigger   string  `help:"Trigger mode (${enum})." default:"none" enum:"none,rising,falling,high,low"`
 	Retrigger uint32  `help:"Scans per trigger event (0=disabled)." default:"0"`
-	Raw       bool    `help:"Output raw values." default:"false"`
 	Output    string  `help:"Output file." short:"o" default:"-"`
 	Timestamp string  `help:"Timestamp format (${enum})." default:"elapsed" enum:"elapsed,unix,iso8601,none"`
+	Format    string  `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *analogScanCmd) Run(app *cli) error {
@@ -120,7 +120,7 @@ func (c *analogScanCmd) Run(app *cli) error {
 	startTime := time.Now()
 
 	// Write header.
-	switch app.Format {
+	switch c.Format {
 	case "json":
 		// No header for JSONL.
 	default:
@@ -144,7 +144,7 @@ func (c *analogScanCmd) Run(app *cli) error {
 
 		elapsed := float64(scan) / c.Rate
 
-		switch app.Format {
+		switch c.Format {
 		case "json":
 			obj := make(map[string]any, len(queue)+2)
 			obj["scan"] = scan
@@ -152,11 +152,7 @@ func (c *analogScanCmd) Run(app *cli) error {
 				obj["timestamp"] = c.formatTimestamp(elapsed, startTime)
 			}
 			for i, name := range colNames {
-				if c.Raw {
-					obj[name] = frame[i]
-				} else {
-					obj[name] = frame[i]
-				}
+				obj[name] = frame[i]
 			}
 			if err := printJSON(obj); err != nil {
 				return err

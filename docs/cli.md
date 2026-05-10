@@ -15,7 +15,6 @@ go build ./cmd/daq
 | `--log-level`  | `info`  | Log level: debug, info, warn, error |
 | `--log-format` | `text`  | Log format: text, json              |
 | `--model`      |         | Force device model: 1808, 1808x     |
-| `--format`     | `text`  | Output format: text, csv, json      |
 
 ## Commands
 
@@ -105,9 +104,9 @@ daq analog scan --channels 0-3 --rate 10000 --count 100 -o data.csv
 | `--count`      | 100            | Number of scans (0 = continuous)                 |
 | `--trigger`    | `none`         | Trigger: none, rising, falling, high, low        |
 | `--retrigger`  | 0              | Scans per trigger event (0 = disabled)           |
-| `--raw`        | false          | Output raw values                                |
 | `-o`           | stdout         | Output file path                                 |
 | `--timestamp`  | `elapsed`      | Timestamp format: elapsed, unix, iso8601, none   |
+| `--format`     | `text`         | Output format: text, json                        |
 
 Use Ctrl-C to stop a continuous scan (`--count 0`).
 
@@ -366,7 +365,8 @@ daq cal table --channel -1 --output ain
 
 ## capture
 
-Capture scan data to a binary capture file.
+Capture scan data to a binary capture file. Capture always writes raw ADC
+codes (`RawUint32` format); calibration is applied when reading or exporting.
 
 ```sh
 daq capture --channels 0-3 --rate 10000 --count 0 -o recording.daq --compress
@@ -384,11 +384,12 @@ daq capture --channels 0-3 --rate 10000 --count 0 -o recording.daq --compress
 | `--retrigger`   | 0       | Scans per trigger event (0 = disabled)           |
 | `-o`            |         | Output file (default: `capture_<timestamp>.daq`) |
 | `--compress`    | false   | Enable zstd compression                          |
-| `--raw`         | false   | Store raw uint32 instead of calibrated float64   |
-| `--buffer-size` | 1024    | Frames to buffer before flushing                 |
+| `--buffer-size` | 8192    | Frames to buffer before flushing                 |
+| `--pipeline`    | 32      | USB read-ahead pipeline depth (batches buffered) |
 | `--description` |         | Description stored in capture header             |
 | `--operator`    |         | Operator name stored in capture header           |
 | `--session-id`  |         | Session identifier stored in capture header      |
+| `--cpu-profile` |         | Write CPU profile to file                        |
 
 ## file
 
@@ -416,6 +417,21 @@ daq file export --format wav -o data.wav recording.daq
 | `--format`    |         | Export format: csv, excel, sqlite, wav (required) |
 | `-o`          |         | Output file path (auto-generated if omitted)       |
 | `--overwrite` | false   | Overwrite existing output file           |
+
+## bench
+
+Benchmark USB scan throughput without file I/O overhead. Useful for isolating
+whether overruns are caused by USB read speed or by file writing.
+
+```sh
+daq bench --channels 0-7 --rate 200000 --duration 10
+```
+
+| Flag         | Default | Description                       |
+|--------------|---------|-----------------------------------|
+| `--channels` | `0-7`   | Analog input channels             |
+| `--rate`     | 35000   | Sample rate in Hz per channel     |
+| `--duration` | 5       | Test duration in seconds          |
 
 ## Scan Queue Channels
 

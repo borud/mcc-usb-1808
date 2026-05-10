@@ -14,7 +14,9 @@ type patternCmd struct {
 
 // --- show ---
 
-type patternShowCmd struct{}
+type patternShowCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *patternShowCmd) Run(app *cli) error {
 	dev, err := openAndInit(app)
@@ -31,7 +33,7 @@ func (c *patternShowCmd) Run(app *cli) error {
 
 	cmpMode := compareModeName(cfg.Options)
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]any{
 			"value":   fmt.Sprintf("0x%02X", cfg.Value),
 			"mask":    fmt.Sprintf("0x%02X", cfg.Mask),

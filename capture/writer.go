@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
-	"math"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -56,8 +55,7 @@ type Writer struct {
 	raw       io.Writer     // original writer (for seeking back to patch frame count)
 	enc       *zstd.Encoder // non-nil when compressed
 	numCh         int
-	frameSize     int // bytes per frame
-	format        DataFormat
+	frameSize     int // bytes per frame (numCh * 4)
 	buf           []byte
 	bufUsed       int
 	framesWritten uint64
@@ -81,15 +79,10 @@ func NewWriter(w io.Writer, h Header, opts ...WriterOption) (*Writer, error) {
 		o(&cfg)
 	}
 
-	var sampleSize int
-	switch h.Format {
-	case RawUint32:
-		sampleSize = 4
-	case CalibratedFloat64:
-		sampleSize = 8
-	default:
+	if h.Format != RawUint32 {
 		return nil, ErrInvalidFormat
 	}
+	const sampleSize = 4
 	numCh := len(h.Channels)
 	frameSize := numCh * sampleSize
 
@@ -136,24 +129,19 @@ func NewWriter(w io.Writer, h Header, opts ...WriterOption) (*Writer, error) {
 		enc:       enc,
 		numCh:     numCh,
 		frameSize: frameSize,
-		format:    h.Format,
 		buf:       make([]byte, cfg.bufferFrames*frameSize),
 	}, nil
 }
 
 // WriteFrame writes one frame of raw uint32 values.
 //
-// The writer's format must be [RawUint32]; otherwise [ErrInvalidFormat] is
-// returned. Returns [ErrFrameSizeMismatch] if len(values) != len(channels).
+// Returns [ErrFrameSizeMismatch] if len(values) != len(channels).
 // Returns [ErrWriterClosed] if the writer has been closed.
 //
 // WriteFrame does not allocate after the Writer is constructed.
 func (w *Writer) WriteFrame(values []uint32) error {
 	if w.closed {
 		return ErrWriterClosed
-	}
-	if w.format != RawUint32 {
-		return ErrInvalidFormat
 	}
 	if len(values) != w.numCh {
 		return ErrFrameSizeMismatch
@@ -173,36 +161,32 @@ func (w *Writer) WriteFrame(values []uint32) error {
 	return nil
 }
 
-// WriteFrameFloat64 writes one frame of calibrated float64 values.
+// WriteBulk writes pre-formatted frame data directly into the buffer.
+// The caller must ensure data contains correctly formatted little-endian
+// uint32 samples (numCh samples per frame). This is the zero-copy fast
+// path for raw captures where USB bulk data is already in the target wire
+// format.
 //
-// The writer's format must be [CalibratedFloat64]; otherwise
-// [ErrInvalidFormat] is returned. Returns [ErrFrameSizeMismatch] if
-// len(values) != len(channels). Returns [ErrWriterClosed] if the writer
-// has been closed.
-//
-// WriteFrameFloat64 does not allocate after the Writer is constructed.
-func (w *Writer) WriteFrameFloat64(values []float64) error {
+// Returns [ErrWriterClosed] if the writer has been closed.
+func (w *Writer) WriteBulk(data []byte) error {
 	if w.closed {
 		return ErrWriterClosed
 	}
-	if w.format != CalibratedFloat64 {
-		return ErrInvalidFormat
-	}
-	if len(values) != w.numCh {
-		return ErrFrameSizeMismatch
-	}
 
-	if w.bufUsed+w.frameSize > len(w.buf) {
-		if err := w.Flush(); err != nil {
-			return err
+	w.framesWritten += uint64(len(data) / w.frameSize)
+	for len(data) > 0 {
+		space := len(w.buf) - w.bufUsed
+		if space == 0 {
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			space = len(w.buf)
 		}
+		n := min(len(data), space)
+		copy(w.buf[w.bufUsed:], data[:n])
+		w.bufUsed += n
+		data = data[n:]
 	}
-
-	for i, v := range values {
-		binary.LittleEndian.PutUint64(w.buf[w.bufUsed+i*8:], math.Float64bits(v))
-	}
-	w.bufUsed += w.frameSize
-	w.framesWritten++
 	return nil
 }
 

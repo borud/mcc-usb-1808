@@ -89,5 +89,15 @@ err := dev.StopAnalogOutScan()
 ### Underrun
 
 If the host does not write data fast enough, the device FIFO underruns. The
-status bit `StatusAOutScanUnder` is set and can be checked via
-`Status().AOutScanUnderrun()`.
+status bit `StatusAOutScanUnder` is set and can be checked via the `Status`
+method:
+
+```go
+status, err := dev.Status()
+if err != nil {
+    log.Fatal(err)
+}
+if status.AOutScanUnderrun() {
+    // handle underrun
+}
+```

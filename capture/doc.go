@@ -5,9 +5,9 @@
 // describing the channels, sample rate, calibration, and data format, followed
 // by fixed-width frames of sample data.
 //
-// Two storage formats are supported:
-//   - [RawUint32]: 4 bytes per sample (raw 18-bit ADC / counter / digital values).
-//   - [CalibratedFloat64]: 8 bytes per sample (pre-calibrated voltages).
+// New captures use [RawUint32] (4 bytes per sample, raw 18-bit ADC / counter /
+// digital values). The legacy [calibratedFloat64] format (8 bytes per sample) is
+// supported for reading older files but rejected by [NewWriter].
 //
 // Frame data may optionally be zstd-compressed.
 //

@@ -121,5 +121,7 @@ dev.Reset()      // Reset the device.
 
 ## Thread Safety
 
-All `Device` methods are safe for concurrent use. Each method holds an internal
-mutex for the duration of its USB operation.
+Control and configuration methods (single reads, writes, status, configuration)
+are safe for concurrent use and serialized by an internal mutex. A running scan
+iterator (`ScanAnalogIn`, `ScanAnalogInRaw`, `ScanAnalogInBulk`) owns the scan
+until stopped and should not be used concurrently with other scan operations.

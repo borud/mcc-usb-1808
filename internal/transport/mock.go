@@ -83,6 +83,21 @@ func (m *MockTransport) BulkRead(endpoint uint8, length int, _ time.Duration) ([
 	return m.nextResponse()
 }
 
+// BulkReadInto implements Transport.
+func (m *MockTransport) BulkReadInto(endpoint uint8, buf []byte, _ time.Duration) (int, error) {
+	m.Calls = append(m.Calls, Call{
+		Method:   "BulkReadInto",
+		Endpoint: endpoint,
+		Length:   len(buf),
+	})
+	data, err := m.nextResponse()
+	if err != nil {
+		return 0, err
+	}
+	n := copy(buf, data)
+	return n, nil
+}
+
 // BulkWrite implements Transport.
 func (m *MockTransport) BulkWrite(endpoint uint8, data []byte, _ time.Duration) (int, error) {
 	dataCopy := make([]byte, len(data))
