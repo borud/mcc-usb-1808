@@ -33,12 +33,6 @@ func testHeaderRaw(channels int) Header {
 	}
 }
 
-func testHeaderFloat64(channels int) Header {
-	h := testHeaderRaw(channels)
-	h.Format = CalibratedFloat64
-	return h
-}
-
 func testHeaderMixed() Header {
 	return Header{
 		DeviceModel:     "USB-1808X",
@@ -80,22 +74,6 @@ func writeRawFrames(t *testing.T, w *Writer, numCh, n int) [][]uint32 {
 	return frames
 }
 
-// writeFloat64Frames writes n frames of float64 data, returning the values written.
-func writeFloat64Frames(t *testing.T, w *Writer, numCh, n int) [][]float64 {
-	t.Helper()
-	frames := make([][]float64, n)
-	for i := range n {
-		vals := make([]float64, numCh)
-		for ch := range numCh {
-			vals[ch] = float64(i*numCh+ch) * 0.001
-		}
-		frames[i] = vals
-		if err := w.WriteFrameFloat64(vals); err != nil {
-			t.Fatalf("WriteFrameFloat64 %d: %v", i, err)
-		}
-	}
-	return frames
-}
 
 // TestNewWriter_NoChannels verifies that NewWriter returns ErrNoChannels for an empty channel list.
 func TestNewWriter_NoChannels(t *testing.T) {
@@ -115,31 +93,6 @@ func TestNewWriter_InvalidFormat(t *testing.T) {
 	}
 }
 
-func TestWriteFrame_WrongFormat(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderFloat64(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-
-	if err := w.WriteFrame([]uint32{1, 2}); !errors.Is(err, ErrInvalidFormat) {
-		t.Fatalf("expected ErrInvalidFormat, got %v", err)
-	}
-}
-
-func TestWriteFrameFloat64_WrongFormat(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-
-	if err := w.WriteFrameFloat64([]float64{1, 2}); !errors.Is(err, ErrInvalidFormat) {
-		t.Fatalf("expected ErrInvalidFormat, got %v", err)
-	}
-}
 
 func TestWriteFrame_SizeMismatch(t *testing.T) {
 	var buf bytes.Buffer
@@ -157,18 +110,6 @@ func TestWriteFrame_SizeMismatch(t *testing.T) {
 	}
 }
 
-func TestWriteFrameFloat64_SizeMismatch(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderFloat64(3))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-
-	if err := w.WriteFrameFloat64([]float64{1}); !errors.Is(err, ErrFrameSizeMismatch) {
-		t.Fatalf("expected ErrFrameSizeMismatch, got %v", err)
-	}
-}
 
 func TestWriteFrame_AfterClose(t *testing.T) {
 	var buf bytes.Buffer
@@ -183,18 +124,6 @@ func TestWriteFrame_AfterClose(t *testing.T) {
 	}
 }
 
-func TestWriteFrameFloat64_AfterClose(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderFloat64(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-
-	if err := w.WriteFrameFloat64([]float64{1, 2}); !errors.Is(err, ErrWriterClosed) {
-		t.Fatalf("expected ErrWriterClosed, got %v", err)
-	}
-}
 
 func TestFlush_AfterClose(t *testing.T) {
 	var buf bytes.Buffer
@@ -360,52 +289,6 @@ func TestRoundTrip_RawUint32(t *testing.T) {
 	}
 }
 
-// TestRoundTrip_CalibratedFloat64 writes and reads back CalibratedFloat64 frames, verifying data integrity.
-func TestRoundTrip_CalibratedFloat64(t *testing.T) {
-	const numCh = 3
-	const numFrames = 50
-
-	var buf bytes.Buffer
-	h := testHeaderFloat64(numCh)
-	w, err := NewWriter(&buf, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	written := writeFloat64Frames(t, w, numCh, numFrames)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	if r.Header().Format != CalibratedFloat64 {
-		t.Fatalf("format = %d, want CalibratedFloat64", r.Header().Format)
-	}
-
-	for i := range numFrames {
-		f, err := r.ReadFrame()
-		if err != nil {
-			t.Fatalf("ReadFrame %d: %v", i, err)
-		}
-		// RawValues should be nil for float64 format.
-		if f.RawValues() != nil {
-			t.Errorf("frame %d: RawValues should be nil for CalibratedFloat64", i)
-		}
-		vals := f.Values()
-		if len(vals) != numCh {
-			t.Fatalf("frame %d: got %d values, want %d", i, len(vals), numCh)
-		}
-		for ch := range numCh {
-			if vals[ch] != written[i][ch] {
-				t.Errorf("frame %d ch %d: got %f, want %f", i, ch, vals[ch], written[i][ch])
-			}
-		}
-	}
-}
 
 // TestRoundTrip_RawCompressed verifies round-trip of compressed RawUint32 frames.
 func TestRoundTrip_RawCompressed(t *testing.T) {
@@ -448,39 +331,6 @@ func TestRoundTrip_RawCompressed(t *testing.T) {
 	}
 }
 
-func TestRoundTrip_Float64Compressed(t *testing.T) {
-	const numCh = 3
-	const numFrames = 200
-
-	var buf bytes.Buffer
-	h := testHeaderFloat64(numCh)
-	w, err := NewWriter(&buf, h, WithCompression(true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	written := writeFloat64Frames(t, w, numCh, numFrames)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	for i := range numFrames {
-		f, err := r.ReadFrame()
-		if err != nil {
-			t.Fatalf("ReadFrame %d: %v", i, err)
-		}
-		for ch := range numCh {
-			if f.Values()[ch] != written[i][ch] {
-				t.Errorf("frame %d ch %d: got %f, want %f", i, ch, f.Values()[ch], written[i][ch])
-			}
-		}
-	}
-}
 
 // TestRoundTrip_SingleFrame verifies round-trip of a single frame followed by EOF.
 func TestRoundTrip_SingleFrame(t *testing.T) {
@@ -726,33 +576,6 @@ func TestFrame_Values_RawWithCalibration(t *testing.T) {
 	}
 }
 
-// TestFrame_Values_Float64Direct verifies that Values() returns CalibratedFloat64 data as-is.
-func TestFrame_Values_Float64Direct(t *testing.T) {
-	const numCh = 2
-	var buf bytes.Buffer
-	h := testHeaderFloat64(numCh)
-	w, err := NewWriter(&buf, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrameFloat64([]float64{3.14, -2.718})
-	w.Close()
-
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	f, err := r.ReadFrame()
-	if err != nil {
-		t.Fatal(err)
-	}
-	vals := f.Values()
-	if vals[0] != 3.14 || vals[1] != -2.718 {
-		t.Errorf("got %v, want [3.14, -2.718]", vals)
-	}
-}
 
 // TestFrames_Iterator verifies the Frames() range iterator reads all frames in order.
 func TestFrames_Iterator(t *testing.T) {
@@ -1363,88 +1186,6 @@ func FuzzCaptureRaw(f *testing.F) {
 	})
 }
 
-// FuzzCaptureFloat64 emulates "daq capture" (without --raw) end-to-end:
-// writes CalibratedFloat64 frames and reads them back.
-func FuzzCaptureFloat64(f *testing.F) {
-	for _, queueBits := range []uint16{0x000F, 0x00FF, 0x0103, 0x1FFF} {
-		for _, nFrames := range []int{0, 1, 10, 100} {
-			for _, compress := range []bool{false, true} {
-				f.Add(queueBits, nFrames, compress)
-			}
-		}
-	}
-
-	f.Fuzz(func(t *testing.T, queueBits uint16, nFrames int, compress bool) {
-		if nFrames < 0 || nFrames > 5000 {
-			t.Skip()
-		}
-		queueBits &= 0x1FFF
-		if queueBits == 0 {
-			t.Skip()
-		}
-
-		var queue []int
-		for i := range 13 {
-			if queueBits&(1<<i) != 0 {
-				queue = append(queue, i)
-			}
-		}
-		nCh := len(queue)
-
-		h := buildFuzzHeader(queue, make([]uint8, nCh), CalibratedFloat64, 100000)
-
-		var buf bytes.Buffer
-		var opts []WriterOption
-		if compress {
-			opts = append(opts, WithCompression(true))
-		}
-
-		w, err := NewWriter(&buf, h, opts...)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		for i := range nFrames {
-			vals := make([]float64, nCh)
-			for j := range nCh {
-				vals[j] = float64(i*nCh+j) * 0.001
-			}
-			if err := w.WriteFrameFloat64(vals); err != nil {
-				t.Fatalf("WriteFrameFloat64 %d: %v", i, err)
-			}
-		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-
-		r, err := NewReader(bytes.NewReader(buf.Bytes()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer r.Close()
-
-		count := 0
-		for frame, err := range r.Frames() {
-			if err != nil {
-				t.Fatalf("Frames() at %d: %v", count, err)
-			}
-			if frame.RawValues() != nil {
-				t.Fatalf("frame %d: RawValues should be nil for CalibratedFloat64", count)
-			}
-			vals := frame.Values()
-			for j := range nCh {
-				want := float64(count*nCh+j) * 0.001
-				if vals[j] != want {
-					t.Fatalf("frame %d ch %d: got %f, want %f", count, j, vals[j], want)
-				}
-			}
-			count++
-		}
-		if count != nFrames {
-			t.Fatalf("read %d frames, want %d", count, nFrames)
-		}
-	})
-}
 
 // FuzzCalibrate exercises the calibrate function across all ranges with
 // fuzzed raw values and calibration coefficients.
@@ -1505,13 +1246,11 @@ func FuzzCalibrate(f *testing.F) {
 func FuzzCaptureSeekable(f *testing.F) {
 	for _, nCh := range []int{1, 4, 8, 13} {
 		for _, nFrames := range []int{0, 1, 50, 500} {
-			for _, useFloat := range []bool{false, true} {
-				f.Add(nCh, nFrames, useFloat)
-			}
+			f.Add(nCh, nFrames)
 		}
 	}
 
-	f.Fuzz(func(t *testing.T, nCh, nFrames int, useFloat bool) {
+	f.Fuzz(func(t *testing.T, nCh, nFrames int) {
 		if nCh < 1 || nCh > 13 || nFrames < 0 || nFrames > 5000 {
 			t.Skip()
 		}
@@ -1528,11 +1267,7 @@ func FuzzCaptureSeekable(f *testing.F) {
 			queue = append(queue, i%13)
 		}
 
-		format := RawUint32
-		if useFloat {
-			format = CalibratedFloat64
-		}
-		h := buildFuzzHeader(queue, make([]uint8, nCh), format, 48000)
+		h := buildFuzzHeader(queue, make([]uint8, nCh), RawUint32, 48000)
 
 		w, err := NewWriter(tmpFile, h)
 		if err != nil {
@@ -1540,22 +1275,12 @@ func FuzzCaptureSeekable(f *testing.F) {
 		}
 
 		for i := range nFrames {
-			if useFloat {
-				vals := make([]float64, nCh)
-				for j := range nCh {
-					vals[j] = float64(i*nCh+j) * 0.001
-				}
-				if err := w.WriteFrameFloat64(vals); err != nil {
-					t.Fatalf("write %d: %v", i, err)
-				}
-			} else {
-				vals := make([]uint32, nCh)
-				for j := range nCh {
-					vals[j] = uint32(i*nCh+j) & 0x3FFFF
-				}
-				if err := w.WriteFrame(vals); err != nil {
-					t.Fatalf("write %d: %v", i, err)
-				}
+			vals := make([]uint32, nCh)
+			for j := range nCh {
+				vals[j] = uint32(i*nCh+j) & 0x3FFFF
+			}
+			if err := w.WriteFrame(vals); err != nil {
+				t.Fatalf("write %d: %v", i, err)
 			}
 		}
 		if err := w.Close(); err != nil {
@@ -1606,17 +1331,6 @@ func benchData(numCh, numFrames int) [][]uint32 {
 	return data
 }
 
-func benchDataFloat64(numCh, numFrames int) [][]float64 {
-	data := make([][]float64, numFrames)
-	for i := range numFrames {
-		vals := make([]float64, numCh)
-		for ch := range numCh {
-			vals[ch] = float64(i*13+ch*7) * 0.001
-		}
-		data[i] = vals
-	}
-	return data
-}
 
 func BenchmarkWriteRaw(b *testing.B) {
 	const numCh = 8
@@ -1652,39 +1366,6 @@ func BenchmarkWriteRawCompressed(b *testing.B) {
 	}
 }
 
-func BenchmarkWriteFloat64(b *testing.B) {
-	const numCh = 8
-	data := benchDataFloat64(numCh, 1)
-	h := testHeaderFloat64(numCh)
-	frame := data[0]
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		w, _ := NewWriter(io.Discard, h)
-		for range 10000 {
-			w.WriteFrameFloat64(frame)
-		}
-		w.Close()
-	}
-}
-
-func BenchmarkWriteFloat64Compressed(b *testing.B) {
-	const numCh = 8
-	data := benchDataFloat64(numCh, 1)
-	h := testHeaderFloat64(numCh)
-	frame := data[0]
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		w, _ := NewWriter(io.Discard, h, WithCompression(true))
-		for range 10000 {
-			w.WriteFrameFloat64(frame)
-		}
-		w.Close()
-	}
-}
 
 func BenchmarkReadRaw(b *testing.B) {
 	const numCh = 8
@@ -1742,61 +1423,6 @@ func BenchmarkReadRawCompressed(b *testing.B) {
 	}
 }
 
-func BenchmarkReadFloat64(b *testing.B) {
-	const numCh = 8
-	const numFrames = 10000
-	data := benchDataFloat64(numCh, numFrames)
-	h := testHeaderFloat64(numCh)
-
-	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, h)
-	for _, f := range data {
-		w.WriteFrameFloat64(f)
-	}
-	w.Close()
-	raw := buf.Bytes()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		r, _ := NewReader(bytes.NewReader(raw))
-		for {
-			_, err := r.ReadFrame()
-			if err != nil {
-				break
-			}
-		}
-		r.Close()
-	}
-}
-
-func BenchmarkReadFloat64Compressed(b *testing.B) {
-	const numCh = 8
-	const numFrames = 10000
-	data := benchDataFloat64(numCh, numFrames)
-	h := testHeaderFloat64(numCh)
-
-	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, h, WithCompression(true))
-	for _, f := range data {
-		w.WriteFrameFloat64(f)
-	}
-	w.Close()
-	raw := buf.Bytes()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		r, _ := NewReader(bytes.NewReader(raw))
-		for {
-			_, err := r.ReadFrame()
-			if err != nil {
-				break
-			}
-		}
-		r.Close()
-	}
-}
 
 // BenchmarkWriteDiscard_Uncompressed vs Compressed isolates compression overhead
 // by writing to io.Discard (no I/O cost).

@@ -154,7 +154,7 @@ func (fr *FrameReader) ensureBuffers(n int) {
 		case RawUint32:
 			f.raw = make([]uint32, fr.numCh)
 			f.floats = make([]float64, fr.numCh)
-		case CalibratedFloat64:
+		case calibratedFloat64:
 			f.floats = make([]float64, fr.numCh)
 		}
 		fr.frames = append(fr.frames, f)
@@ -173,7 +173,7 @@ func (fr *FrameReader) decodeFrame(i int) {
 		for ch := range fr.numCh {
 			fr.frames[i].raw[ch] = binary.LittleEndian.Uint32(fr.buf[off+ch*4:])
 		}
-	case CalibratedFloat64:
+	case calibratedFloat64:
 		for ch := range fr.numCh {
 			fr.frames[i].floats[ch] = math.Float64frombits(binary.LittleEndian.Uint64(fr.buf[off+ch*8:]))
 		}

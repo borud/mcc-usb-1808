@@ -34,30 +34,6 @@ func writeSeekableRaw(t *testing.T, numCh, numFrames int) (*os.File, [][]uint32)
 	return f, written
 }
 
-func writeSeekableFloat64(t *testing.T, numCh, numFrames int) (*os.File, [][]float64) {
-	t.Helper()
-
-	f, err := os.CreateTemp("", "frame-reader-*.daq")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	h := testHeaderFloat64(numCh)
-	w, err := NewWriter(f, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	written := writeFloat64Frames(t, w, numCh, numFrames)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		t.Fatal(err)
-	}
-	return f, written
-}
-
 func TestFrameReader_RoundTrip_Raw(t *testing.T) {
 	const numCh = 4
 	const numFrames = 100
@@ -94,34 +70,6 @@ func TestFrameReader_RoundTrip_Raw(t *testing.T) {
 	}
 }
 
-func TestFrameReader_RoundTrip_Float64(t *testing.T) {
-	const numCh = 3
-	const numFrames = 50
-
-	f, written := writeSeekableFloat64(t, numCh, numFrames)
-	defer os.Remove(f.Name())
-	defer f.Close()
-
-	fr, err := NewFrameReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fr.Close()
-
-	frames, err := fr.ReadFrames(0, numFrames)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i, frame := range frames {
-		vals := frame.Values()
-		for ch := range numCh {
-			if vals[ch] != written[i][ch] {
-				t.Errorf("frame %d ch %d: got %f, want %f", i, ch, vals[ch], written[i][ch])
-			}
-		}
-	}
-}
 
 func TestFrameReader_RandomAccess(t *testing.T) {
 	const numCh = 2

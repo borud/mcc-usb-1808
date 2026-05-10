@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/pprof"
+	"sync"
 	"time"
 
 	"github.com/borud/mcc-usb-1808"
@@ -22,14 +24,27 @@ type captureCmd struct {
 	Retrigger   uint32  `help:"Scans per trigger event (0=disabled)." default:"0"`
 	Out         string  `help:"Output file (default: capture_<timestamp>.daq)." short:"o"`
 	Compress    bool    `help:"Enable zstd compression." default:"false"`
-	Raw         bool    `help:"Store raw uint32 values instead of calibrated float64." default:"false"`
-	BufferSize  int     `help:"Frames to buffer before flushing." default:"1024"`
+	BufferSize  int     `help:"Frames to buffer before flushing." default:"8192"`
+	Pipeline    int     `help:"USB read-ahead pipeline depth (batches buffered)." default:"32"`
 	Description string  `help:"Free-form description stored in capture header." default:""`
 	Operator    string  `help:"Operator name stored in capture header." default:""`
 	SessionID   string  `help:"Session identifier stored in capture header." default:""`
+	CPUProfile  string  `help:"Write CPU profile to file." default:""`
 }
 
 func (c *captureCmd) Run(app *cli) error {
+	if c.CPUProfile != "" {
+		f, err := os.Create(c.CPUProfile)
+		if err != nil {
+			return fmt.Errorf("create cpu profile: %w", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return fmt.Errorf("start cpu profile: %w", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
+
 	if c.Out == "" {
 		c.Out = fmt.Sprintf("capture_%s.daq", time.Now().Format("20060102_150405"))
 	}
@@ -137,33 +152,64 @@ func (c *captureCmd) Run(app *cli) error {
 	}()
 
 	cfg := usb1808.AnalogInScanConfig{
-		Channels:    queue,
-		Rate:        c.Rate,
-		Count:       uint32(c.Count),
-		RetrigCount: c.Retrigger,
-		Options:     scanOpts,
+		Channels:      queue,
+		Rate:          c.Rate,
+		Count:         uint32(c.Count),
+		RetrigCount:   c.Retrigger,
+		Options:       scanOpts,
+		PipelineDepth: c.Pipeline,
 	}
 
 	fmt.Fprintf(os.Stderr, "capturing to %s (%d channels, %.0f Hz, press Ctrl-C to stop)\n", c.Out, len(queue), c.Rate)
 
-	if c.Raw {
-		for frame, err := range dev.ScanAnalogInRaw(ctx, cfg) {
-			if err != nil {
-				return fmt.Errorf("scan: %w", err)
+	// Decouple disk I/O from the USB pipeline: the scan loop only
+	// copies data into a channel (memory-only), while a background
+	// goroutine handles all disk writes.
+	const writeDepth = 64
+	writeCh := make(chan []byte, writeDepth)
+
+	// Write buffer pool: eliminates allocations in steady state.
+	writePool := make(chan []byte, writeDepth+1)
+
+	var writeErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for data := range writeCh {
+			if writeErr == nil {
+				if err := cw.WriteBulk(data); err != nil {
+					writeErr = err
+				}
 			}
-			if err := cw.WriteFrame(frame); err != nil {
-				return fmt.Errorf("write: %w", err)
-			}
+			writePool <- data[:cap(data)]
 		}
-	} else {
-		for frame, err := range dev.ScanAnalogIn(ctx, cfg) {
-			if err != nil {
-				return fmt.Errorf("scan: %w", err)
+	}()
+
+	for data, err := range dev.ScanAnalogInBulk(ctx, cfg) {
+		if err != nil {
+			if ctx.Err() != nil {
+				break
 			}
-			if err := cw.WriteFrameFloat64(frame); err != nil {
-				return fmt.Errorf("write: %w", err)
-			}
+			close(writeCh)
+			wg.Wait()
+			return fmt.Errorf("scan: %w", err)
 		}
+
+		var buf []byte
+		select {
+		case buf = <-writePool:
+		default:
+			buf = make([]byte, cap(data))
+		}
+		buf = buf[:len(data)]
+		copy(buf, data)
+		writeCh <- buf
+	}
+	close(writeCh)
+	wg.Wait()
+	if writeErr != nil {
+		return fmt.Errorf("write: %w", writeErr)
 	}
 
 	if err := cw.Close(); err != nil {
@@ -216,11 +262,6 @@ func (c *captureCmd) buildHeader(dev *usb1808.Device, queue []int, ranges []usb1
 		channels[i] = cc
 	}
 
-	format := capture.CalibratedFloat64
-	if c.Raw {
-		format = capture.RawUint32
-	}
-
 	h := capture.Header{
 		DeviceModel:     dev.Model().String(),
 		DeviceSerial:    serial,
@@ -228,7 +269,7 @@ func (c *captureCmd) buildHeader(dev *usb1808.Device, queue []int, ranges []usb1
 		CalibrationDate: calDate,
 		Channels:        channels,
 		SampleRate:      c.Rate,
-		Format:          format,
+		Format:          capture.RawUint32,
 		Timestamp:       time.Now().UnixMilli(),
 	}
 

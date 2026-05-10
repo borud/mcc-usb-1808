@@ -297,9 +297,7 @@ func humanBytes(b int64) string {
 func formatName(f capture.DataFormat) string {
 	switch f {
 	case capture.RawUint32:
-		return "RawUint32 (4 bytes/sample)"
-	case capture.CalibratedFloat64:
-		return "CalibratedFloat64 (8 bytes/sample)"
+		return "RawUint32 (4 bytes/sample, little-endian)"
 	default:
 		return fmt.Sprintf("unknown(%d)", f)
 	}

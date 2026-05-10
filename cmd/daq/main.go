@@ -36,6 +36,7 @@ type cli struct {
 	Cal     calCmd     `cmd:"" help:"Calibration data."`
 	Capture captureCmd `cmd:"" help:"Capture scan data to file."`
 	File    fileCmd    `cmd:"" help:"Capture file operations."`
+	Bench   benchCmd   `cmd:"" help:"Benchmark scan throughput."`
 }
 
 func main() {
