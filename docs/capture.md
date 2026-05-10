@@ -30,7 +30,10 @@ depends on the data format:
 | Format              | Sample Size | Contents                         |
 |---------------------|-------------|----------------------------------|
 | `RawUint32`         | 4 bytes     | Raw 18-bit ADC / counter / DIO   |
-| `CalibratedFloat64` | 8 bytes    | Pre-calibrated voltages (float64)|
+| `CalibratedFloat64` | 8 bytes     | Pre-calibrated voltages (legacy, read-only) |
+
+New captures always use `RawUint32`. The `CalibratedFloat64` format exists
+only for reading older files; `NewWriter` rejects it.
 
 All values are little-endian.
 
@@ -64,8 +67,8 @@ for _, sample := range samples {
 }
 ```
 
-Use `WriteFrame` for `RawUint32` format and `WriteFrameFloat64` for
-`CalibratedFloat64`.
+Use `WriteFrame` to write `[]uint32` frames. The writer only accepts
+`RawUint32` format.
 
 ### Writer Options
 
@@ -79,7 +82,7 @@ Use `WriteFrame` for `RawUint32` format and `WriteFrameFloat64` for
 | Method            | Description                                        |
 |-------------------|----------------------------------------------------|
 | `WriteFrame`      | Write one frame of `[]uint32` (RawUint32 format)   |
-| `WriteFrameFloat64`| Write one frame of `[]float64` (CalibratedFloat64)|
+| `WriteBulk`       | Write pre-formatted raw bytes (zero-copy fast path)|
 | `Flush`           | Flush buffered frames to the underlying writer     |
 | `Close`           | Flush, finalize compression, patch frame count     |
 | `FramesWritten`   | Return number of frames written so far             |
