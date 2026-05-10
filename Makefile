@@ -1,4 +1,7 @@
 BINARIES := $(notdir $(shell find cmd -mindepth 1 -maxdepth 1 -type d))
+VERSION  := $(shell ver version 2>/dev/null || echo dev)
+BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+LDFLAGS  := -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(BUILD_DATE)"
 
 .PHONY: $(BINARIES)
 .PHONY: all
@@ -86,8 +89,6 @@ clean:
 CONTAINER_ENGINE ?= podman
 IMAGE_NAME       := mcc-usb-1808-builder
 GO_VERSION       := $(shell grep '^go ' go.mod | awk '{print $$2}')
-VERSION          ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-BUILD_DATE       := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 linux-amd64:
 	@echo "*** $@"
