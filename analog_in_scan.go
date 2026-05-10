@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/borud/mcc-usb-1808/internal/transport"
 	"github.com/borud/mcc-usb-1808/internal/wire"
 )
 
@@ -267,6 +268,11 @@ const DefaultConcurrentReaders = 4
 // does not cause the device FIFO to overrun.
 func (d *Device) ScanAnalogInRaw(ctx context.Context, cfg AnalogInScanConfig) iter.Seq2[[]uint32, error] {
 	return func(yield func([]uint32, error) bool) {
+		if ar, ok := d.transport.(transport.AsyncBulkReader); ok {
+			d.scanRawAsync(ctx, cfg, ar, yield)
+			return
+		}
+
 		if err := d.ConfigureAnalogInScan(cfg.Channels); err != nil {
 			yield(nil, err)
 			return
@@ -426,6 +432,11 @@ func (d *Device) ScanAnalogInRaw(ctx context.Context, cfg AnalogInScanConfig) it
 // only the remaining frames needed to reach the requested count.
 func (d *Device) ScanAnalogInBulk(ctx context.Context, cfg AnalogInScanConfig) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
+		if ar, ok := d.transport.(transport.AsyncBulkReader); ok {
+			d.scanBulkAsync(ctx, cfg, ar, yield)
+			return
+		}
+
 		if err := d.ConfigureAnalogInScan(cfg.Channels); err != nil {
 			yield(nil, err)
 			return
@@ -576,6 +587,159 @@ func (d *Device) ScanAnalogInBulk(ctx context.Context, cfg AnalogInScanConfig) i
 			if total > 0 && scansRead >= total {
 				return
 			}
+		}
+	}
+}
+
+// scanRawAsync implements ScanAnalogInRaw using an async bulk transfer ring.
+func (d *Device) scanRawAsync(ctx context.Context, cfg AnalogInScanConfig, ar transport.AsyncBulkReader, yield func([]uint32, error) bool) {
+	if err := d.ConfigureAnalogInScan(cfg.Channels); err != nil {
+		yield(nil, err)
+		return
+	}
+
+	if cfg.PacketSize == 0 {
+		nCh := len(cfg.Channels)
+		samplesPerScan := nCh
+		if cfg.Rate*float64(samplesPerScan) < MaxPacketSize/4 {
+			cfg.PacketSize = uint8(min(samplesPerScan, 256) - 1)
+		}
+	}
+
+	nCh := len(cfg.Channels)
+	batch := scanBatchSize(cfg.Rate, nCh)
+	batchBytes := batch * nCh * 4
+	readTimeout := scanReadTimeout(cfg.Rate, batch)
+
+	_ = d.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
+
+	if err := d.StartAnalogInScan(cfg); err != nil {
+		yield(nil, err)
+		return
+	}
+
+	depth := cfg.PipelineDepth
+	if depth <= 0 {
+		depth = DefaultPipelineDepth
+	}
+
+	ring, err := ar.NewBulkRing(epBulkIn, batchBytes, 8, depth, uint(readTimeout.Milliseconds()))
+	if err != nil {
+		yield(nil, err)
+		_ = d.StopAnalogInScan()
+		return
+	}
+
+	defer func() {
+		ring.Stop()
+		_ = d.StopAnalogInScan()
+	}()
+
+	total := int(cfg.Count)
+	scansRead := 0
+	frame := make([]uint32, nCh)
+
+	for result := range ring.Results() {
+		if result.Err != nil {
+			yield(nil, result.Err)
+			return
+		}
+		if ctx.Err() != nil {
+			yield(nil, ctx.Err())
+			return
+		}
+
+		nSamples := len(result.Data) / 4
+		nActual := nSamples / nCh
+		for s := range nActual {
+			for i := range nCh {
+				off := (s*nCh + i) * 4
+				frame[i] = wire.Uint32LE(result.Data[off : off+4])
+			}
+			if !yield(frame, nil) {
+				return
+			}
+			scansRead++
+			if total > 0 && scansRead >= total {
+				return
+			}
+		}
+	}
+}
+
+// scanBulkAsync implements ScanAnalogInBulk using an async bulk transfer ring.
+func (d *Device) scanBulkAsync(ctx context.Context, cfg AnalogInScanConfig, ar transport.AsyncBulkReader, yield func([]byte, error) bool) {
+	if err := d.ConfigureAnalogInScan(cfg.Channels); err != nil {
+		yield(nil, err)
+		return
+	}
+
+	if cfg.PacketSize == 0 {
+		nCh := len(cfg.Channels)
+		samplesPerScan := nCh
+		if cfg.Rate*float64(samplesPerScan) < MaxPacketSize/4 {
+			cfg.PacketSize = uint8(min(samplesPerScan, 256) - 1)
+		}
+	}
+
+	nCh := len(cfg.Channels)
+	frameSize := nCh * 4
+	batch := scanBatchSize(cfg.Rate, nCh)
+	batchBytes := batch * nCh * 4
+	readTimeout := scanReadTimeout(cfg.Rate, batch)
+
+	_ = d.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
+
+	if err := d.StartAnalogInScan(cfg); err != nil {
+		yield(nil, err)
+		return
+	}
+
+	depth := cfg.PipelineDepth
+	if depth <= 0 {
+		depth = DefaultPipelineDepth
+	}
+
+	ring, err := ar.NewBulkRing(epBulkIn, batchBytes, 8, depth, uint(readTimeout.Milliseconds()))
+	if err != nil {
+		yield(nil, err)
+		_ = d.StopAnalogInScan()
+		return
+	}
+
+	defer func() {
+		ring.Stop()
+		_ = d.StopAnalogInScan()
+	}()
+
+	total := int(cfg.Count)
+	scansRead := 0
+
+	for result := range ring.Results() {
+		if result.Err != nil {
+			yield(nil, result.Err)
+			return
+		}
+		if ctx.Err() != nil {
+			yield(nil, ctx.Err())
+			return
+		}
+
+		data := result.Data
+		if total > 0 {
+			remaining := (total - scansRead) * frameSize
+			if len(data) > remaining {
+				data = data[:remaining]
+			}
+		}
+
+		if !yield(data, nil) {
+			return
+		}
+
+		scansRead += len(data) / frameSize
+		if total > 0 && scansRead >= total {
+			return
 		}
 	}
 }

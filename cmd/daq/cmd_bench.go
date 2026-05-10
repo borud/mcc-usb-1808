@@ -65,8 +65,12 @@ func (b *benchCmd) Run(app *cli) error {
 		Count:    0,
 	}
 
-	fmt.Fprintf(os.Stderr, "bench: %d ch, %.0f Hz/ch, %d KB transfer, %.0fs\n",
-		nCh, b.Rate, b.Transfer/1024, b.Duration)
+	xferMode := "sync-multi-reader"
+	if dev.AsyncBulkSupported() {
+		xferMode = "async-ring"
+	}
+	fmt.Fprintf(os.Stderr, "bench: %d ch, %.0f Hz/ch, %d KB transfer, %.0fs [%s]\n",
+		nCh, b.Rate, b.Transfer/1024, b.Duration, xferMode)
 
 	// Simulate capture command: signal handler, file, writer.
 	sigCh := make(chan os.Signal, 1)
