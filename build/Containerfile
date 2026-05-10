@@ -1,0 +1,38 @@
+ARG GO_VERSION=1.25.1
+
+FROM --platform=linux/amd64 docker.io/library/golang:${GO_VERSION}-bookworm AS builder
+
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        gcc-aarch64-linux-gnu \
+        libusb-1.0-0-dev \
+        libusb-1.0-0-dev:arm64 \
+        pkg-config && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+ARG TARGETARCH=amd64
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+
+RUN export CGO_ENABLED=1 && \
+    export GOOS=linux && \
+    export GOARCH=${TARGETARCH} && \
+    if [ "${TARGETARCH}" = "arm64" ]; then \
+        export CC=aarch64-linux-gnu-gcc; \
+        export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig; \
+    fi && \
+    cd cmd/daq && \
+    go build \
+        -ldflags="-X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
+        -trimpath \
+        -o /out/daq
+
+FROM scratch
+COPY --from=builder /out/daq /daq

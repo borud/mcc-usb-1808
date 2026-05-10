@@ -1,0 +1,7 @@
+{
+  "name": "AInScanStart_1000scans_100kHz_4ch",
+  "request": 18,
+  "wValue": 0,
+  "wIndex": 0,
+  "payload_hex": "e803000000000000e703000000ff00"
+}
