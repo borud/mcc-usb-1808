@@ -2,7 +2,9 @@ package main
 
 import "fmt"
 
-type statusCmd struct{}
+type statusCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *statusCmd) Run(app *cli) error {
 	dev, err := openDevice(app)
@@ -16,7 +18,7 @@ func (c *statusCmd) Run(app *cli) error {
 		return fmt.Errorf("status: %w", err)
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]any{
 			"raw":               fmt.Sprintf("0x%04X", uint16(status)),
 			"fpga_configured":   status.FPGAConfigured(),

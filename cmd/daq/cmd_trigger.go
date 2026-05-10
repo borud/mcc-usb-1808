@@ -14,7 +14,9 @@ type triggerCmd struct {
 
 // --- show ---
 
-type triggerShowCmd struct{}
+type triggerShowCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *triggerShowCmd) Run(app *cli) error {
 	dev, err := openAndInit(app)
@@ -38,7 +40,7 @@ func (c *triggerShowCmd) Run(app *cli) error {
 		polarity = "high/rising"
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]any{
 			"raw":      fmt.Sprintf("0x%02X", cfg),
 			"mode":     mode,

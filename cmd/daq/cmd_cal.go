@@ -13,7 +13,9 @@ type calCmd struct {
 
 // --- date ---
 
-type calDateCmd struct{}
+type calDateCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *calDateCmd) Run(app *cli) error {
 	dev, err := openAndInit(app)
@@ -27,7 +29,7 @@ func (c *calDateCmd) Run(app *cli) error {
 		return fmt.Errorf("cal date: %w", err)
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]string{
 			"cal_date": calDate.Format("2006-01-02T15:04:05Z"),
 		})
@@ -42,6 +44,7 @@ func (c *calDateCmd) Run(app *cli) error {
 type calTableCmd struct {
 	Channel int    `help:"Filter to specific channel (-1 for all)." default:"-1"`
 	Output  string `help:"Which table (${enum})." default:"ain" enum:"ain,aout"`
+	Format  string `help:"Output format (${enum})." default:"text" enum:"text,csv,json"`
 }
 
 func (c *calTableCmd) Run(app *cli) error {
@@ -52,16 +55,16 @@ func (c *calTableCmd) Run(app *cli) error {
 	defer dev.Close()
 
 	if c.Output == "aout" {
-		return c.showAOut(app, dev)
+		return c.showAOut(dev)
 	}
-	return c.showAIn(app, dev)
+	return c.showAIn(dev)
 }
 
-func (c *calTableCmd) showAIn(app *cli, dev *usb1808.Device) error {
+func (c *calTableCmd) showAIn(dev *usb1808.Device) error {
 	table := dev.AnalogInCalTable()
 	rangeLabels := []string{"±10V", "±5V", "0-10V", "0-5V"}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		var entries []map[string]any
 		for ch := range 8 {
 			if c.Channel >= 0 && ch != c.Channel {
@@ -79,7 +82,7 @@ func (c *calTableCmd) showAIn(app *cli, dev *usb1808.Device) error {
 		return printJSON(map[string]any{"ain_calibration": entries})
 	}
 
-	if app.Format == "csv" {
+	if c.Format == "csv" {
 		fmt.Println("channel,range,slope,offset")
 		for ch := range 8 {
 			if c.Channel >= 0 && ch != c.Channel {
@@ -105,10 +108,10 @@ func (c *calTableCmd) showAIn(app *cli, dev *usb1808.Device) error {
 	return nil
 }
 
-func (c *calTableCmd) showAOut(app *cli, dev *usb1808.Device) error {
+func (c *calTableCmd) showAOut(dev *usb1808.Device) error {
 	table := dev.AnalogOutCalTable()
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		var entries []map[string]any
 		for ch := range 2 {
 			if c.Channel >= 0 && ch != c.Channel {
@@ -123,7 +126,7 @@ func (c *calTableCmd) showAOut(app *cli, dev *usb1808.Device) error {
 		return printJSON(map[string]any{"aout_calibration": entries})
 	}
 
-	if app.Format == "csv" {
+	if c.Format == "csv" {
 		fmt.Println("channel,slope,offset")
 		for ch := range 2 {
 			if c.Channel >= 0 && ch != c.Channel {

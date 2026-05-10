@@ -5,10 +5,12 @@ import (
 	"runtime"
 )
 
-type versionCmd struct{}
+type versionCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *versionCmd) Run(app *cli) error {
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]string{
 			"version":    version,
 			"build_date": buildDate,

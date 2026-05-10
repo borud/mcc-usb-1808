@@ -19,7 +19,6 @@ type cli struct {
 	LogLevel  string `help:"Log level (${enum})." default:"info" enum:"debug,info,warn,error"`
 	LogFormat string `help:"Log format (${enum})." default:"text" enum:"text,json"`
 	Model     string `help:"Force device model (1808,1808x)." default:"" enum:",1808,1808x"`
-	Format    string `help:"Output format (${enum})." default:"text" enum:"text,csv,json"`
 
 	Info    infoCmd    `cmd:"" help:"Show device information."`
 	Status  statusCmd  `cmd:"" help:"Show device status."`

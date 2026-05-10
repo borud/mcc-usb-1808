@@ -16,7 +16,6 @@ type benchCmd struct {
 	Channels string  `help:"Analog input channels." default:"0-7"`
 	Rate     float64 `help:"Sample rate in Hz per channel." default:"35000"`
 	Duration float64 `help:"Test duration in seconds." default:"5"`
-	Transfer int     `help:"Transfer size in bytes." default:"65536"`
 }
 
 func (b *benchCmd) Run(app *cli) error {
@@ -69,8 +68,8 @@ func (b *benchCmd) Run(app *cli) error {
 	if dev.AsyncBulkSupported() {
 		xferMode = "async-ring"
 	}
-	fmt.Fprintf(os.Stderr, "bench: %d ch, %.0f Hz/ch, %d KB transfer, %.0fs [%s]\n",
-		nCh, b.Rate, b.Transfer/1024, b.Duration, xferMode)
+	fmt.Fprintf(os.Stderr, "bench: %d ch, %.0f Hz/ch, %.0fs [%s]\n",
+		nCh, b.Rate, b.Duration, xferMode)
 
 	// Simulate capture command: signal handler, file, writer.
 	sigCh := make(chan os.Signal, 1)

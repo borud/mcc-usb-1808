@@ -18,7 +18,8 @@ type counterCmd struct {
 // --- read ---
 
 type counterReadCmd struct {
-	Index int `help:"Counter/encoder index (0-3)." default:"0"`
+	Index  int    `help:"Counter/encoder index (0-3)." default:"0"`
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *counterReadCmd) Run(app *cli) error {
@@ -34,7 +35,7 @@ func (c *counterReadCmd) Run(app *cli) error {
 	}
 
 	name := counterName(c.Index)
-	if app.Format == "json" {
+	if c.Format == "json" {
 		return printJSON(map[string]any{"index": c.Index, "name": name, "value": val})
 	}
 	fmt.Printf("%s: %d\n", name, val)
@@ -75,6 +76,7 @@ type counterConfigCmd struct {
 	Min        *int64 `help:"Minimum limit value." name:"min"`
 	Max        *int64 `help:"Maximum limit value." name:"max"`
 	Show       bool   `help:"Show current config without changing." default:"false"`
+	Format     string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *counterConfigCmd) Run(app *cli) error {
@@ -134,7 +136,7 @@ func (c *counterConfigCmd) Run(app *cli) error {
 	val, _ := dev.ReadCounter(c.Index)
 	opts, _ := dev.CounterOptions(c.Index)
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		info := map[string]any{
 			"index":   c.Index,
 			"name":    name,
@@ -171,6 +173,7 @@ func (c *counterConfigCmd) Run(app *cli) error {
 type counterWatchCmd struct {
 	Index    int    `help:"Counter/encoder index (0-3)." default:"0"`
 	Interval string `help:"Polling interval." default:"100ms"`
+	Format   string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *counterWatchCmd) Run(app *cli) error {
@@ -196,7 +199,7 @@ func (c *counterWatchCmd) Run(app *cli) error {
 			return fmt.Errorf("read: %w", err)
 		}
 
-		if app.Format == "json" {
+		if c.Format == "json" {
 			if err := printJSON(map[string]any{"index": c.Index, "name": name, "value": val}); err != nil {
 				return err
 			}

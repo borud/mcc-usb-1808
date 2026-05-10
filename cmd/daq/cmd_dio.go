@@ -18,7 +18,8 @@ type dioCmd struct {
 // --- dir ---
 
 type dioDirCmd struct {
-	Set string `help:"Set directions: hex (0x0F) or IIOO notation (I=input, O=output)." default:""`
+	Set    string `help:"Set directions: hex (0x0F) or IIOO notation (I=input, O=output)." default:""`
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *dioDirCmd) Run(app *cli) error {
@@ -43,7 +44,7 @@ func (c *dioDirCmd) Run(app *cli) error {
 		return fmt.Errorf("read direction: %w", err)
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		pins := make([]string, 4)
 		for i := range 4 {
 			if dir&(1<<(3-i)) != 0 {
@@ -71,7 +72,9 @@ func (c *dioDirCmd) Run(app *cli) error {
 
 // --- read ---
 
-type dioReadCmd struct{}
+type dioReadCmd struct {
+	Format string `help:"Output format (${enum})." default:"text" enum:"text,json"`
+}
 
 func (c *dioReadCmd) Run(app *cli) error {
 	dev, err := openAndInit(app)
@@ -85,7 +88,7 @@ func (c *dioReadCmd) Run(app *cli) error {
 		return fmt.Errorf("read: %w", err)
 	}
 
-	if app.Format == "json" {
+	if c.Format == "json" {
 		bits := make([]int, 4)
 		for i := range 4 {
 			if val&(1<<i) != 0 {
@@ -139,6 +142,7 @@ func (c *dioWriteCmd) Run(app *cli) error {
 
 type dioWatchCmd struct {
 	Interval string `help:"Polling interval." default:"100ms"`
+	Format   string `help:"Output format (${enum})." default:"text" enum:"text,json"`
 }
 
 func (c *dioWatchCmd) Run(app *cli) error {
@@ -162,7 +166,7 @@ func (c *dioWatchCmd) Run(app *cli) error {
 			return fmt.Errorf("read: %w", err)
 		}
 
-		if app.Format == "json" {
+		if c.Format == "json" {
 			bits := make([]int, 4)
 			for i := range 4 {
 				if val&(1<<i) != 0 {
