@@ -240,6 +240,11 @@ func ringStageSize(rate float64, nChannels int) int {
 	if totalBytes >= MaxPacketSize {
 		totalBytes = (totalBytes / MaxPacketSize) * MaxPacketSize
 	}
+	// Ensure the buffer can hold at least one full USB packet so the
+	// device never overflows the transfer buffer with a single packet.
+	if totalBytes < MaxPacketSize {
+		totalBytes = MaxPacketSize
+	}
 	// Align to scan boundary so no frame splits across transfers.
 	totalBytes = (totalBytes / bytesPerScan) * bytesPerScan
 	if totalBytes < bytesPerScan {
