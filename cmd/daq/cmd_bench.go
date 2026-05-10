@@ -136,9 +136,9 @@ func (b *benchCmd) Run(app *cli) error {
 				break
 			}
 			elapsed := time.Since(start)
-			fmt.Fprintf(os.Stderr, "FAILED after %d reads, %d bytes, %.2fs: %v\n",
+			fmt.Fprintf(os.Stderr, "FAILED after %d transfers, %d bytes, %.2fs: %v\n",
 				reads, totalBytes, elapsed.Seconds(), err)
-			fmt.Fprintf(os.Stderr, "  max gap between frames: %v\n", maxGap)
+			fmt.Fprintf(os.Stderr, "  max gap between transfers: %v\n", maxGap)
 			close(writeCh)
 			wg.Wait()
 			return err
@@ -163,8 +163,9 @@ func (b *benchCmd) Run(app *cli) error {
 	}
 
 	elapsed := time.Since(start)
-	fmt.Fprintf(os.Stderr, "OK: %d frames, %.1f MB, %.2fs, %.1f MB/s, max_gap=%v\n",
-		reads, float64(totalBytes)/1e6, elapsed.Seconds(),
+	totalSamples := totalBytes / 4
+	fmt.Fprintf(os.Stderr, "OK: %d transfers, %d samples, %.1f MB, %.2fs, %.1f MB/s, max_gap=%v\n",
+		reads, totalSamples, float64(totalBytes)/1e6, elapsed.Seconds(),
 		float64(totalBytes)/elapsed.Seconds()/1e6, maxGap)
 	return nil
 }
