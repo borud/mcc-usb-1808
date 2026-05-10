@@ -20,9 +20,10 @@ type analogScanCmd struct {
 	Count     int     `help:"Number of scans (0=continuous)." default:"100"`
 	Trigger   string  `help:"Trigger mode (${enum})." default:"none" enum:"none,rising,falling,high,low"`
 	Retrigger uint32  `help:"Scans per trigger event (0=disabled)." default:"0"`
-	Output    string  `help:"Output file." short:"o" default:"-"`
-	Timestamp string  `help:"Timestamp format (${enum})." default:"elapsed" enum:"elapsed,unix,iso8601,none"`
-	Format    string  `help:"Output format (${enum})." default:"text" enum:"text,json"`
+	Output    string        `help:"Output file." short:"o" default:"-"`
+	Timestamp string        `help:"Timestamp format (${enum})." default:"elapsed" enum:"elapsed,unix,iso8601,none"`
+	Format    string        `help:"Output format (${enum})." default:"text" enum:"text,json"`
+	Flush     time.Duration `help:"Flush output interval (0=fully buffered)." default:"0"`
 }
 
 func (c *analogScanCmd) Run(app *cli) error {
@@ -84,6 +85,12 @@ func (c *analogScanCmd) Run(app *cli) error {
 	}
 	w := bufio.NewWriterSize(out, 64*1024)
 	defer w.Flush()
+
+	var flushTicker *time.Ticker
+	if c.Flush > 0 {
+		flushTicker = time.NewTicker(c.Flush)
+		defer flushTicker.Stop()
+	}
 
 	// Configure trigger.
 	var scanOpts uint8
@@ -171,9 +178,22 @@ func (c *analogScanCmd) Run(app *cli) error {
 			fmt.Fprintln(w)
 		}
 
+		if flushTicker != nil && tickFired(flushTicker) {
+			w.Flush()
+		}
+
 		scan++
 	}
 	return nil
+}
+
+func tickFired(t *time.Ticker) bool {
+	select {
+	case <-t.C:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *analogScanCmd) formatTimestamp(elapsed float64, startTime time.Time) string {

@@ -107,6 +107,7 @@ daq analog scan --channels 0-3 --rate 10000 --count 100 -o data.csv
 | `-o`           | stdout         | Output file path                                 |
 | `--timestamp`  | `elapsed`      | Timestamp format: elapsed, unix, iso8601, none   |
 | `--format`     | `text`         | Output format: text, json                        |
+| `--flush`      | 0              | Flush interval (0=fully buffered, e.g. `500ms`)  |
 
 Use Ctrl-C to stop a continuous scan (`--count 0`).
 
