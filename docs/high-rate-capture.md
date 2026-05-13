@@ -20,8 +20,6 @@ device's on-board FIFO filled up. At 8 channels and 200 kHz per channel, the
 device produces 6.4 MB/s of raw data. Several factors can cause the host to
 fall behind:
 
-- **Compression overhead**: zstd compression consumes CPU. Try capturing
-  without `--compress` first to rule this out.
 - **Disk I/O jitter**: slow or network-mounted disks can stall writes. Use a
   local SSD for high-rate captures.
 - **Terminal output**: printing calibrated samples at high rates is expensive.
@@ -42,7 +40,7 @@ daq bench --channels 0-7 --rate 200000 --duration 10
 ```
 
 If `daq bench` succeeds but `daq capture` overruns, the bottleneck is in file
-writing -- increase `--buffer-size`, disable compression, or use a faster disk.
+writing -- increase `--buffer-size` or use a faster disk.
 
 If `daq bench` itself overruns, the issue is in USB transfer throughput. Check
 USB controller load, try a different USB port, or reduce the channel count or
@@ -61,11 +59,10 @@ overrun occurred.
 
 ## Tuning Checklist
 
-1. Start without compression (`--compress` off).
-2. Use a local SSD, not a network volume.
-3. Use `daq capture`, not `daq analog scan`, for sustained recording.
-4. Increase `--buffer-size` if you see intermittent overruns (disk jitter).
-5. Increase `--pipeline` if the application side is not keeping up.
-6. Run `daq bench` to isolate USB read speed from file writing.
-7. If overruns persist, reduce channels or sample rate.
-8. Confirm USB-1808 vs USB-1808X rate limits (50 kS/s vs 200 kS/s per channel).
+1. Use a local SSD, not a network volume.
+2. Use `daq capture`, not `daq analog scan`, for sustained recording.
+3. Increase `--buffer-size` if you see intermittent overruns (disk jitter).
+4. Increase `--pipeline` if the application side is not keeping up.
+5. Run `daq bench` to isolate USB read speed from file writing.
+6. If overruns persist, reduce channels or sample rate.
+7. Confirm USB-1808 vs USB-1808X rate limits (50 kS/s vs 200 kS/s per channel).

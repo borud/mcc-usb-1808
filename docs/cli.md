@@ -360,11 +360,11 @@ daq cal table --channel -1 --output ain
 
 ## capture
 
-Capture scan data to a binary capture file. Capture always writes raw ADC
+Capture scan data to a binary capture directory. Capture always writes raw ADC
 codes (`RawUint32` format); calibration is applied when reading or exporting.
 
 ```sh
-daq capture --channels 0-3 --rate 10000 --count 0 -o recording.daq --compress
+daq capture --channels 0-3 --rate 10000 --count 0 -o recording
 ```
 
 | Flag            | Default | Description                                      |
@@ -377,8 +377,8 @@ daq capture --channels 0-3 --rate 10000 --count 0 -o recording.daq --compress
 | `--count`       | 0       | Number of scans (0 = continuous)                 |
 | `--trigger`     | `none`  | Trigger: none, rising, falling, high, low        |
 | `--retrigger`   | 0       | Scans per trigger event (0 = disabled)           |
-| `-o`            |         | Output file (default: `capture_<timestamp>.daq`) |
-| `--compress`    | false   | Enable zstd compression                          |
+| `-o`            |         | Output directory (default: `capture_<timestamp>`) |
+| `--file-size`   | 104857600 | Target segment file size in bytes              |
 | `--buffer-size` | 8192    | Frames to buffer before flushing                 |
 | `--pipeline`    | 32      | USB read-ahead pipeline depth (batches buffered) |
 | `--description` |         | Description stored in capture header             |

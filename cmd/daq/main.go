@@ -33,7 +33,7 @@ type cli struct {
 	Trigger triggerCmd `cmd:"" help:"Trigger configuration."`
 	Pattern patternCmd `cmd:"" help:"Pattern detection configuration."`
 	Cal     calCmd     `cmd:"" help:"Calibration data."`
-	Capture captureCmd `cmd:"" help:"Capture scan data to file."`
+	Capture captureCmd `cmd:"" help:"Capture scan data to directory."`
 	File    fileCmd    `cmd:"" help:"Capture file operations."`
 	Bench   benchCmd   `cmd:"" help:"Benchmark scan throughput."`
 }

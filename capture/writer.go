@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	defaultSegmentSize   = 100 * 1024 * 1024 // 100 MB
+	defaultSegmentSize = 100 * 1024 * 1024 // 100 MB
 )
 
 // WriterOption configures a [Writer].
@@ -28,10 +28,10 @@ func WithBufferSize(frames int) WriterOption {
 	}
 }
 
-// WithFileSize sets the target uncompressed segment size in bytes. Segments
-// are rotated after approximately this many bytes of frame data. The actual
-// split point is calculated by frame count, so segments may be slightly
-// larger if a [Writer.WriteBulk] call straddles the boundary.
+// WithFileSize sets the target segment size in bytes. Segments are rotated
+// after approximately this many bytes of frame data. The actual split point is
+// calculated by frame count, so segments may be slightly larger if a
+// [Writer.WriteBulk] call straddles the boundary.
 // The default is 100 MB.
 func WithFileSize(bytes int) WriterOption {
 	return func(c *writerConfig) {

@@ -1,28 +1,30 @@
 # Capture
 
-The `capture` package provides a binary file format for recording and replaying
-DAQ data. The `capture/export` subpackage converts capture files to CSV, Excel,
-SQLite, Parquet, and WAV.
+The `capture` package provides a binary directory format for recording and
+replaying DAQ data. The `capture/export` subpackage converts capture
+directories to CSV, Excel, SQLite, Parquet, and WAV.
 
 ## File Format
 
-Capture files use a compact binary layout: a fixed preamble, a JSON header, and
-a stream of fixed-width frames.
+Each capture directory contains segment files. Each segment uses a compact
+binary layout: a fixed preamble, a JSON header, and a stream of fixed-width
+frames.
 
 ```
 Offset  Len   Field
 0       4     Magic: "DAQ\x00"
-4       1     Version (0x01)
-5       1     Flags (bit 0 = zstd compressed)
+4       1     Version (0x02)
+5       1     Flags (reserved, 0)
 6       4     Header length N (uint32 LE)
 10      8     Frame count (uint64 LE, 0 = unknown)
-18      N     Header (JSON, UTF-8)
-18+N    ...   Frame data
+18      2     Sequence number (uint16 LE)
+20      8     Global frame offset (uint64 LE)
+28      N     Header (JSON, UTF-8)
+28+N    ...   Frame data
 ```
 
-Frame data is optionally zstd-compressed. The frame count is written as 0
-initially and patched by `Writer.Close` when the underlying writer supports
-seeking. Non-seekable writers (pipes, network) keep 0.
+Frame data is stored as raw fixed-width samples. The frame count is written as
+0 initially and patched by `Writer.Close`.
 
 Each frame contains one sample per channel with no padding. The sample size
 depends on the data format:
@@ -40,9 +42,6 @@ All values are little-endian.
 ## Writing
 
 ```go
-f, _ := os.Create("recording.daq")
-defer f.Close()
-
 header := capture.Header{
     DeviceModel:  "USB-1808X",
     DeviceSerial: "01A2B3C4",
@@ -56,18 +55,17 @@ header := capture.Header{
     Timestamp:  time.Now().UnixMilli(),
 }
 
-w, _ := capture.NewWriter(f, header,
-    capture.WithCompression(true),
+w, _ := capture.NewWriter("recording",
+    header,
     capture.WithBufferSize(2048),
+    capture.WithFileSize(100*1024*1024),
 )
 defer w.Close()
 
-for _, sample := range samples {
-    w.WriteFrame(sample) // []uint32, one value per channel
-}
+w.WriteBulk(rawBytes) // raw little-endian uint32 frame data from USB
 ```
 
-Use `WriteFrame` to write `[]uint32` frames. The writer only accepts
+Use `WriteBulk` to write pre-formatted raw bytes. The writer only accepts
 `RawUint32` format.
 
 ### Writer Options
@@ -75,27 +73,21 @@ Use `WriteFrame` to write `[]uint32` frames. The writer only accepts
 | Option                       | Default | Description                          |
 |------------------------------|---------|--------------------------------------|
 | `WithBufferSize(frames int)` | 1024    | Frames to buffer before flushing     |
-| `WithCompression(bool)`      | false   | Enable zstd compression of frame data|
+| `WithFileSize(bytes int)`    | 100 MB  | Target segment file size             |
 
 ### Writer Methods
 
 | Method            | Description                                        |
 |-------------------|----------------------------------------------------|
-| `WriteFrame`      | Write one frame of `[]uint32` (RawUint32 format)   |
 | `WriteBulk`       | Write pre-formatted raw bytes (zero-copy fast path)|
 | `Flush`           | Flush buffered frames to the underlying writer     |
-| `Close`           | Flush, finalize compression, patch frame count     |
+| `Close`           | Flush and patch frame count                        |
 | `FramesWritten`   | Return number of frames written so far             |
-
-`Close` does not close the underlying `io.Writer`.
 
 ## Reading
 
 ```go
-f, _ := os.Open("recording.daq")
-defer f.Close()
-
-r, _ := capture.NewReader(f)
+r, _ := capture.NewReader("recording")
 defer r.Close()
 
 h := r.Header()
@@ -122,21 +114,18 @@ copy(saved, frame.Values())
 
 ## Random-Access Reading
 
-`FrameReader` provides random-access reading for uncompressed capture files.
-It requires an `io.ReadSeeker` and can seek to any frame by index.
+`Reader.ReadFrames` provides random-access reading by global frame index across
+segments.
 
 ```go
-f, _ := os.Open("recording.daq")
-defer f.Close()
+r, _ := capture.NewReader("recording")
+defer r.Close()
 
-fr, _ := capture.NewFrameReader(f)
-defer fr.Close()
-
-h := fr.Header()
+h := r.Header()
 
 // Read 1000 frames starting at t=10s.
 start := h.FrameAtTime(10.0)
-frames, _ := fr.ReadFrames(start, 1000)
+frames, _ := r.ReadFrames(start, 1000)
 
 for _, frame := range frames {
     vals := frame.Values() // []float64, calibrated
@@ -144,21 +133,18 @@ for _, frame := range frames {
 }
 ```
 
-Compressed files do not support random access; `NewFrameReader` returns
-`ErrCompressedSeek` for compressed files.
-
 The returned `[]Frame` slice and all data within it are owned by the
-`FrameReader` and reused on the next `ReadFrames` call. Copy any values you
-need to retain.
+`Reader` and reused on the next `ReadFrames` call. Copy any values you need to
+retain.
 
-### FrameReader Methods
+### Reader Methods
 
 | Method         | Description                                          |
 |----------------|------------------------------------------------------|
+| `ReadFrame`    | Read the next frame sequentially                     |
+| `Frames`       | Iterate over remaining frames                        |
 | `ReadFrames`   | Read up to n frames starting at a frame index        |
 | `Header`       | Return the file header                               |
-| `FrameCount`   | Return total frame count (0 if unknown)              |
-| `Duration`     | Return capture duration as `time.Duration`           |
 | `Close`        | Mark reader as closed                                |
 
 Out-of-bounds reads return nil (no error). Partial reads (fewer frames than
@@ -237,7 +223,6 @@ Non-analog channels are returned as `float64(raw)` without calibration.
 | `ErrReaderClosed`       | Reader method called after Close       |
 | `ErrNoChannels`         | Header has empty Channels slice        |
 | `ErrInvalidFormat`      | Unrecognized DataFormat or format mismatch |
-| `ErrCompressedSeek`     | Compressed file opened with FrameReader    |
 
 ## Export
 
