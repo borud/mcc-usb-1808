@@ -415,6 +415,11 @@ daq file export --format wav -o data.wav recording.daq
 | `--overwrite` | false   | Overwrite existing output file           |
 | `--raw`       | false   | Include raw sample columns where supported |
 
+CSV, Excel, SQLite, and Parquet value columns use calibrated voltages for
+analog input channels. Digital, counter, and encoder channels are exported as
+raw numeric values. Parquet also supports `--raw`, which adds exact `uint32`
+sample-code columns alongside the calibrated value columns.
+
 WAV export writes 32-bit IEEE float PCM. It is scaled for visualization:
 analog channels are converted to calibrated voltages and then normalized
 independently to `[-1, +1]` by dividing by each channel's peak absolute value.
