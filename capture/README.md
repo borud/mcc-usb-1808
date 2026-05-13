@@ -175,6 +175,22 @@ SELECT timestamp_s, voltage, current FROM frames WHERE voltage > 5.0;
 
 Inserts are batched in transactions of 1000 rows. Uses WAL journal mode.
 
+### Parquet
+
+```go
+f, _ := os.Create("data.parquet")
+defer f.Close()
+
+r, _ := capture.NewReader(captureFile)
+defer r.Close()
+
+export.Parquet(f, r, export.WithRaw())
+```
+
+Writes an Apache Parquet file with `frame_id`, `timestamp_s`, and one
+calibrated value column per channel. `export.WithRaw()` adds one `uint32` raw
+column per channel for `RawUint32` captures.
+
 ### WAV
 
 ```go

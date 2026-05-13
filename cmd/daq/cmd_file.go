@@ -135,17 +135,19 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 
 // fileExportCmd exports a capture file to another format.
 type fileExportCmd struct {
-	ExportFormat string `help:"Export format (${enum})." enum:"csv,excel,sqlite,wav" required:"" name:"to"`
+	ExportFormat string `help:"Export format (${enum})." enum:"csv,excel,sqlite,wav,parquet" required:"" name:"to"`
 	Out          string `help:"Output file path." short:"o"`
 	Overwrite    bool   `help:"Overwrite existing output file." default:"false"`
+	Raw          bool   `help:"Include raw sample columns where supported." default:"false"`
 	File         string `arg:"" help:"Capture file to export."`
 }
 
 var formatExtensions = map[string]string{
-	"csv":    ".csv",
-	"excel":  ".xlsx",
-	"sqlite": ".db",
-	"wav":    ".wav",
+	"csv":     ".csv",
+	"excel":   ".xlsx",
+	"sqlite":  ".db",
+	"wav":     ".wav",
+	"parquet": ".parquet",
 }
 
 func (c *fileExportCmd) Run(_ *cli) error {
@@ -216,6 +218,21 @@ func (c *fileExportCmd) Run(_ *cli) error {
 			return err
 		}
 		exportErr = export.WAV(out, r)
+		if closeErr := out.Close(); closeErr != nil && exportErr == nil {
+			exportErr = closeErr
+		}
+	case "parquet":
+		out, err := os.Create(outPath) // #nosec G304 -- CLI tool, path from user args
+		if err != nil {
+			cancel()
+			<-done
+			return err
+		}
+		var opts []export.ParquetOption
+		if c.Raw {
+			opts = append(opts, export.WithRaw())
+		}
+		exportErr = export.Parquet(out, r, opts...)
 		if closeErr := out.Close(); closeErr != nil && exportErr == nil {
 			exportErr = closeErr
 		}

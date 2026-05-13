@@ -404,14 +404,16 @@ Export a capture file to another format.
 daq file export --format csv -o data.csv recording.daq
 daq file export --format excel -o data.xlsx recording.daq
 daq file export --format sqlite -o data.db recording.daq
+daq file export --format parquet --raw -o data.parquet recording.daq
 daq file export --format wav -o data.wav recording.daq
 ```
 
 | Flag          | Default | Description                              |
 |---------------|---------|------------------------------------------|
-| `--format`    |         | Export format: csv, excel, sqlite, wav (required) |
+| `--format`    |         | Export format: csv, excel, sqlite, wav, parquet (required) |
 | `-o`          |         | Output file path (auto-generated if omitted)       |
 | `--overwrite` | false   | Overwrite existing output file           |
+| `--raw`       | false   | Include raw sample columns where supported |
 
 ## bench
 

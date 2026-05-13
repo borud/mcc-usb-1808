@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/csv"
+	"encoding/json"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/borud/mcc-usb-1808/capture"
+	parquet "github.com/parquet-go/parquet-go"
 	"github.com/xuri/excelize/v2"
 	_ "modernc.org/sqlite"
 )
@@ -21,18 +24,18 @@ import (
 //	ch0: AnalogIn BP10V (midpoint 131072 = 0V, slope=1, offset=0)
 //	ch1: DigitalIO (raw passthrough)
 var testFrameData = [][]uint32{
-	{131072, 0xFF}, // 0V, 255
-	{131073, 0x00}, // ~0V, 0
-	{131074, 0x01}, // ~0V, 1
-	{0, 0x02},      // -10V, 2
+	{131072, 0xFF},  // 0V, 255
+	{131073, 0x00},  // ~0V, 0
+	{131074, 0x01},  // ~0V, 1
+	{0, 0x02},       // -10V, 2
 	{0x3FFFF, 0x03}, // ~+10V, 3
 }
 
 func testHeader() capture.Header {
 	return capture.Header{
-		DeviceModel:     "USB-1808X",
-		DeviceSerial:    "12345678",
-		FPGAVersion:     "1.5",
+		DeviceModel:  "USB-1808X",
+		DeviceSerial: "12345678",
+		FPGAVersion:  "1.5",
 		Channels: []capture.Channel{
 			{Index: 0, Type: capture.AnalogIn, Range: 0, Name: "voltage",
 				Cal: &capture.CalEntry{Slope: 1.0, Offset: 0.0}},
@@ -532,6 +535,166 @@ func TestSQLite_LargeBatch(t *testing.T) {
 	if count != numFrames {
 		t.Errorf("frames = %d, want %d", count, numFrames)
 	}
+}
+
+type parquetValueRow struct {
+	FrameID    int64   `parquet:"frame_id"`
+	TimestampS float64 `parquet:"timestamp_s"`
+	Voltage    float64 `parquet:"voltage"`
+	Trigger    float64 `parquet:"trigger"`
+}
+
+type parquetRawRow struct {
+	FrameID    int64   `parquet:"frame_id"`
+	TimestampS float64 `parquet:"timestamp_s"`
+	Voltage    float64 `parquet:"voltage"`
+	VoltageRaw uint32  `parquet:"voltage_raw"`
+	Trigger    float64 `parquet:"trigger"`
+	TriggerRaw uint32  `parquet:"trigger_raw"`
+}
+
+func TestParquet_Basic(t *testing.T) {
+	r := testReader(t)
+	defer r.Close()
+
+	var buf bytes.Buffer
+	if err := Parquet(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parquet.NewGenericReader[parquetValueRow](bytes.NewReader(buf.Bytes()))
+	defer pr.Close()
+
+	if pr.NumRows() != int64(len(testFrameData)) {
+		t.Fatalf("rows = %d, want %d", pr.NumRows(), len(testFrameData))
+	}
+
+	rows := make([]parquetValueRow, len(testFrameData))
+	n, err := pr.Read(rows)
+	if err != nil && err != io.EOF {
+		t.Fatal(err)
+	}
+	if n != len(testFrameData) {
+		t.Fatalf("read %d rows, want %d", n, len(testFrameData))
+	}
+
+	expected := expectedValues()
+	if rows[0].FrameID != 0 || rows[0].TimestampS != 0 {
+		t.Errorf("first row frame metadata = %+v", rows[0])
+	}
+	if rows[0].Voltage != expected[0][0] || rows[0].Trigger != expected[0][1] {
+		t.Errorf("first row values = %+v, want voltage=%v trigger=%v", rows[0], expected[0][0], expected[0][1])
+	}
+	if rows[4].FrameID != 4 {
+		t.Errorf("last frame_id = %d, want 4", rows[4].FrameID)
+	}
+	if math.Abs(rows[4].TimestampS-0.004) > 1e-12 {
+		t.Errorf("last timestamp = %f, want 0.004", rows[4].TimestampS)
+	}
+
+	meta := readParquetMetadata(t, pr.File())
+	if meta.RawIncluded {
+		t.Error("RawIncluded = true, want false")
+	}
+	if meta.ExportedFrameCount != uint64(len(testFrameData)) {
+		t.Errorf("exported_frame_count = %d, want %d", meta.ExportedFrameCount, len(testFrameData))
+	}
+	if meta.Header.DeviceSerial != "12345678" {
+		t.Errorf("metadata device serial = %q", meta.Header.DeviceSerial)
+	}
+	if hasParquetColumn(meta.Columns, parquetColumnRoleRaw, 0) {
+		t.Error("metadata unexpectedly contains raw column")
+	}
+}
+
+func TestParquet_WithRaw(t *testing.T) {
+	r := testReader(t)
+	defer r.Close()
+
+	var buf bytes.Buffer
+	if err := Parquet(&buf, r, WithRaw()); err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parquet.NewGenericReader[parquetRawRow](bytes.NewReader(buf.Bytes()))
+	defer pr.Close()
+
+	rows := make([]parquetRawRow, len(testFrameData))
+	n, err := pr.Read(rows)
+	if err != nil && err != io.EOF {
+		t.Fatal(err)
+	}
+	if n != len(testFrameData) {
+		t.Fatalf("read %d rows, want %d", n, len(testFrameData))
+	}
+
+	for i, row := range rows {
+		if row.VoltageRaw != testFrameData[i][0] {
+			t.Errorf("row %d voltage_raw = %d, want %d", i, row.VoltageRaw, testFrameData[i][0])
+		}
+		if row.TriggerRaw != testFrameData[i][1] {
+			t.Errorf("row %d trigger_raw = %d, want %d", i, row.TriggerRaw, testFrameData[i][1])
+		}
+	}
+
+	meta := readParquetMetadata(t, pr.File())
+	if !meta.RawIncluded {
+		t.Error("RawIncluded = false, want true")
+	}
+	if !hasParquetColumn(meta.Columns, parquetColumnRoleRaw, 0) {
+		t.Error("metadata missing raw column for channel 0")
+	}
+	if !hasParquetColumn(meta.Columns, parquetColumnRoleRaw, 1) {
+		t.Error("metadata missing raw column for channel 1")
+	}
+}
+
+func TestParquet_EmptyCapture(t *testing.T) {
+	var capBuf bytes.Buffer
+	h := testHeader()
+	w, _ := capture.NewWriter(&capBuf, h)
+	w.Close()
+
+	r, _ := capture.NewReader(bytes.NewReader(capBuf.Bytes()))
+	defer r.Close()
+
+	var buf bytes.Buffer
+	if err := Parquet(&buf, r, WithRaw()); err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parquet.NewGenericReader[parquetRawRow](bytes.NewReader(buf.Bytes()))
+	defer pr.Close()
+
+	if pr.NumRows() != 0 {
+		t.Errorf("rows = %d, want 0", pr.NumRows())
+	}
+	meta := readParquetMetadata(t, pr.File())
+	if meta.ExportedFrameCount != 0 {
+		t.Errorf("exported_frame_count = %d, want 0", meta.ExportedFrameCount)
+	}
+}
+
+func readParquetMetadata(t *testing.T, f parquet.FileView) parquetFileMetadata {
+	t.Helper()
+	value, ok := f.Lookup(parquetMetadataKey)
+	if !ok {
+		t.Fatalf("missing parquet metadata key %q", parquetMetadataKey)
+	}
+	var meta parquetFileMetadata
+	if err := json.Unmarshal([]byte(value), &meta); err != nil {
+		t.Fatal(err)
+	}
+	return meta
+}
+
+func hasParquetColumn(columns []parquetColumn, role string, position int) bool {
+	for _, col := range columns {
+		if col.Role == role && col.ChannelPosition == position {
+			return true
+		}
+	}
+	return false
 }
 
 // Verify io.ReadCloser isn't needed (we don't close the reader prematurely).
