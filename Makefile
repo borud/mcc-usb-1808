@@ -70,7 +70,7 @@ fuzz:
 		echo "--- $$target"; \
 		CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" go test -fuzz $$target -fuzztime $(FUZZ_TIME) . || exit 1; \
 	done
-	@for target in FuzzCaptureRaw FuzzCaptureFloat64 FuzzCalibrate FuzzCaptureSeekable; do \
+	@for target in FuzzCaptureRaw FuzzCalibrate FuzzCaptureSeekable; do \
 		echo "--- $$target"; \
 		go test -fuzz $$target -fuzztime $(FUZZ_TIME) ./capture || exit 1; \
 	done

@@ -12,11 +12,6 @@ var (
 	// version is newer than this package supports.
 	ErrUnsupportedVersion = errors.New("capture: unsupported file version")
 
-	// ErrFrameSizeMismatch is returned by [Writer.WriteFrame] or
-	// [Writer.WriteFrameFloat64] when the number of values does not
-	// match the number of channels in the header.
-	ErrFrameSizeMismatch = errors.New("capture: value count does not match channel count")
-
 	// ErrWriterClosed is returned by any [Writer] method called after
 	// [Writer.Close].
 	ErrWriterClosed = errors.New("capture: writer is closed")
@@ -34,7 +29,15 @@ var (
 	// the writer's configured format.
 	ErrInvalidFormat = errors.New("capture: invalid data format for this operation")
 
-	// ErrCompressedSeek is returned by [NewFrameReader] when the file
-	// uses zstd compression, which does not support random access.
-	ErrCompressedSeek = errors.New("capture: compressed files do not support random access")
+	// ErrNotDirectory is returned by [NewReader] when the path is not
+	// a directory.
+	ErrNotDirectory = errors.New("capture: path is not a directory")
+
+	// ErrNoSegments is returned by [NewReader] when the directory
+	// contains no segment files.
+	ErrNoSegments = errors.New("capture: no segment files found")
+
+	// ErrSegmentMismatch is returned by [NewReader] when segment headers
+	// are inconsistent across files in the same capture directory.
+	ErrSegmentMismatch = errors.New("capture: segment headers are inconsistent")
 )

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,43 +14,17 @@ import (
 )
 
 type fileCmd struct {
-	Info   fileInfoCmd   `cmd:"" help:"Show capture file information."`
-	Export fileExportCmd `cmd:"" help:"Export capture file to another format."`
+	Info   fileInfoCmd   `cmd:"" help:"Show capture directory information."`
+	Export fileExportCmd `cmd:"" help:"Export capture to another format."`
 }
 
-// fileInfoCmd displays metadata from a capture file.
+// fileInfoCmd displays metadata from a capture directory.
 type fileInfoCmd struct {
-	File string `arg:"" help:"Capture file to inspect."`
+	Dir string `arg:"" help:"Capture directory to inspect."`
 }
 
 func (c *fileInfoCmd) Run(_ *cli) error {
-	fi, err := os.Stat(c.File)
-	if err != nil {
-		return err
-	}
-
-	f, err := os.Open(c.File)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	// Read preamble to get raw header length and flags.
-	preamble := make([]byte, 18)
-	if _, err := io.ReadFull(f, preamble); err != nil {
-		return fmt.Errorf("read preamble: %w", err)
-	}
-
-	flags := preamble[5]
-	headerLen := binary.LittleEndian.Uint32(preamble[6:10])
-	compressed := flags&0x01 != 0
-
-	// Rewind and open with Reader to get the parsed header.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
-	r, err := capture.NewReader(f)
+	r, err := capture.NewReader(c.Dir)
 	if err != nil {
 		return err
 	}
@@ -60,11 +32,8 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 
 	h := r.Header()
 
-	// File overview.
-	fmt.Printf("File:            %s\n", c.File)
-	fmt.Printf("Size:            %s\n", humanBytes(fi.Size()))
-	fmt.Printf("Header:          %d bytes (preamble: 18, JSON: %d)\n", 18+headerLen, headerLen)
-	fmt.Printf("Compressed:      %v\n", compressed)
+	// Aggregate overview.
+	fmt.Printf("Directory:       %s\n", c.Dir)
 	fmt.Printf("Format:          %s\n", formatName(h.Format))
 	if h.FrameCount > 0 {
 		fmt.Printf("Frame count:     %d\n", h.FrameCount)
@@ -130,29 +99,91 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 		}
 	}
 
+	// Per-segment table.
+	fmt.Println("\nSegments:")
+	entries, err := os.ReadDir(c.Dir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  %-6s  %-12s  %-14s  %s\n", "Seq", "Frames", "Frame Offset", "Size")
+	var totalSize int64
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "seg_") || !strings.HasSuffix(e.Name(), ".daq") {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".pending") {
+			continue
+		}
+		path := filepath.Join(c.Dir, e.Name())
+		fi, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		totalSize += fi.Size()
+
+		f, err := os.Open(path) // #nosec G304 -- CLI tool, path from user args
+		if err != nil {
+			continue
+		}
+		pre, err := readPreamble(f)
+		f.Close()
+		if err != nil {
+			continue
+		}
+		fmt.Printf("  %-6d  %-12d  %-14d  %s\n",
+			pre.sequenceNumber, pre.frameCount, pre.globalFrameOffset, humanBytes(fi.Size()))
+	}
+	fmt.Printf("\nTotal size:      %s\n", humanBytes(totalSize))
+
 	return nil
 }
 
-// fileExportCmd exports a capture file to another format.
+// readPreamble reads the capture preamble from an open file.
+func readPreamble(f *os.File) (struct {
+	sequenceNumber    uint16
+	frameCount        uint64
+	globalFrameOffset uint64
+}, error) {
+	type result struct {
+		sequenceNumber    uint16
+		frameCount        uint64
+		globalFrameOffset uint64
+	}
+
+	buf := make([]byte, 28) // preambleLen
+	if _, err := f.Read(buf); err != nil {
+		return result{}, err
+	}
+
+	return result{
+		sequenceNumber:    uint16(buf[18]) | uint16(buf[19])<<8,
+		frameCount:        uint64(buf[10]) | uint64(buf[11])<<8 | uint64(buf[12])<<16 | uint64(buf[13])<<24 | uint64(buf[14])<<32 | uint64(buf[15])<<40 | uint64(buf[16])<<48 | uint64(buf[17])<<56,
+		globalFrameOffset: uint64(buf[20]) | uint64(buf[21])<<8 | uint64(buf[22])<<16 | uint64(buf[23])<<24 | uint64(buf[24])<<32 | uint64(buf[25])<<40 | uint64(buf[26])<<48 | uint64(buf[27])<<56,
+	}, nil
+}
+
+// fileExportCmd exports a capture to another format.
 type fileExportCmd struct {
-	ExportFormat string `help:"Export format (${enum})." enum:"csv,excel,sqlite,wav" required:"" name:"to"`
+	ExportFormat string `help:"Export format (${enum})." enum:"csv,excel,sqlite,wav,parquet" required:"" name:"to"`
 	Out          string `help:"Output file path." short:"o"`
 	Overwrite    bool   `help:"Overwrite existing output file." default:"false"`
-	File         string `arg:"" help:"Capture file to export."`
+	Raw          bool   `help:"Include raw sample columns where supported." default:"false"`
+	Dir          string `arg:"" help:"Capture directory to export."`
 }
 
 var formatExtensions = map[string]string{
-	"csv":    ".csv",
-	"excel":  ".xlsx",
-	"sqlite": ".db",
-	"wav":    ".wav",
+	"csv":     ".csv",
+	"excel":   ".xlsx",
+	"sqlite":  ".db",
+	"wav":     ".wav",
+	"parquet": ".parquet",
 }
 
 func (c *fileExportCmd) Run(_ *cli) error {
 	// Determine output path.
 	outPath := c.Out
 	if outPath == "" {
-		base := strings.TrimSuffix(filepath.Base(c.File), filepath.Ext(c.File))
+		base := filepath.Base(c.Dir)
 		outPath = base + formatExtensions[c.ExportFormat]
 	}
 
@@ -163,30 +194,18 @@ func (c *fileExportCmd) Run(_ *cli) error {
 		}
 	}
 
-	// Open capture file with a counting reader for progress.
-	fi, err := os.Stat(c.File)
-	if err != nil {
-		return err
-	}
-
-	f, err := os.Open(c.File)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	cr := &countingReader{r: f}
-	r, err := capture.NewReader(cr)
+	r, err := capture.NewReader(c.Dir)
 	if err != nil {
 		return fmt.Errorf("open capture: %w", err)
 	}
 	defer r.Close()
 
-	// Start progress bar.
+	// Start progress display.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	var progress atomic.Int64
 	go func() {
-		showProgress(ctx, "exporting", cr, fi.Size())
+		showExportProgress(ctx, "exporting", &progress)
 		close(done)
 	}()
 
@@ -219,6 +238,21 @@ func (c *fileExportCmd) Run(_ *cli) error {
 		if closeErr := out.Close(); closeErr != nil && exportErr == nil {
 			exportErr = closeErr
 		}
+	case "parquet":
+		out, err := os.Create(outPath) // #nosec G304 -- CLI tool, path from user args
+		if err != nil {
+			cancel()
+			<-done
+			return err
+		}
+		var opts []export.ParquetOption
+		if c.Raw {
+			opts = append(opts, export.WithRaw())
+		}
+		exportErr = export.Parquet(out, r, opts...)
+		if closeErr := out.Close(); closeErr != nil && exportErr == nil {
+			exportErr = closeErr
+		}
 	}
 
 	cancel()
@@ -239,44 +273,23 @@ func (c *fileExportCmd) Run(_ *cli) error {
 	return nil
 }
 
-// countingReader wraps an io.Reader and counts bytes read.
-type countingReader struct {
-	r     io.Reader
-	count atomic.Int64
-}
-
-func (cr *countingReader) Read(p []byte) (int, error) {
-	n, err := cr.r.Read(p)
-	cr.count.Add(int64(n))
-	return n, err
-}
-
-// showProgress displays a progress bar on stderr until ctx is cancelled.
-func showProgress(ctx context.Context, label string, cr *countingReader, total int64) {
-	ticker := time.NewTicker(100 * time.Millisecond)
+// showExportProgress displays a spinner on stderr until ctx is cancelled.
+func showExportProgress(ctx context.Context, label string, _ *atomic.Int64) {
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	spinner := []rune{'|', '/', '-', '\\'}
+	i := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			printProgress(label, total, total)
-			fmt.Fprintln(os.Stderr)
+			fmt.Fprintf(os.Stderr, "\r%s... done\n", label)
 			return
 		case <-ticker.C:
-			printProgress(label, cr.count.Load(), total)
+			fmt.Fprintf(os.Stderr, "\r%s %c", label, spinner[i%len(spinner)])
+			i++
 		}
 	}
-}
-
-func printProgress(label string, current, total int64) {
-	const barWidth = 30
-	pct := float64(current) / float64(total)
-	if pct > 1 {
-		pct = 1
-	}
-	filled := int(pct * barWidth)
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	fmt.Fprintf(os.Stderr, "\r%s [%s] %3.0f%%", label, bar, pct*100)
 }
 
 // Helper formatting functions.

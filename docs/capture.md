@@ -2,7 +2,7 @@
 
 The `capture` package provides a binary file format for recording and replaying
 DAQ data. The `capture/export` subpackage converts capture files to CSV, Excel,
-SQLite, and WAV.
+SQLite, Parquet, and WAV.
 
 ## File Format
 
@@ -256,6 +256,9 @@ export.Excel("output.xlsx", reader)
 // SQLite
 export.SQLite("output.db", reader)
 
+// Parquet
+export.Parquet(parquetWriter, reader, export.WithRaw())
+
 // WAV (32-bit float, normalized to [-1, +1])
 export.WAV(wavWriter, reader)
 ```
@@ -281,9 +284,21 @@ Creates three tables:
 
 Inserts are batched in transactions of 1000 rows with WAL mode enabled.
 
+### Parquet
+
+Writes an Apache Parquet file with `frame_id`, `timestamp_s`, and one
+calibrated value column per channel. Capture metadata and channel-to-column
+mapping are stored in Parquet key/value metadata.
+
+Use `export.WithRaw()` to include an additional `uint32` raw column per channel
+for `RawUint32` captures.
+
 ### WAV
 
-Writes 32-bit IEEE float PCM. Analog channels are normalized by dividing by the
-peak absolute value; non-analog channels are normalized by 262143 (18-bit
-full-scale). The entire capture is buffered in memory for normalization, so this
-is best suited for shorter recordings.
+Writes 32-bit IEEE float PCM. Analog channels are first converted to calibrated
+voltages, then each channel is normalized independently by dividing by its own
+peak absolute value. Non-analog channels are normalized by 262143 (18-bit
+full-scale). This makes WAV useful for visualization in audio editors, but it
+does not preserve absolute voltage levels or cross-channel amplitude ratios.
+The entire capture is buffered in memory for normalization, so this is best
+suited for shorter recordings.

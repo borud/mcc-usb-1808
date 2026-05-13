@@ -1,5 +1,5 @@
 // Package export provides functions to export capture data to common file
-// formats: CSV, Excel (.xlsx), SQLite, and WAV.
+// formats: CSV, Excel (.xlsx), SQLite, Parquet, and WAV.
 //
 // Each export function reads all remaining frames from a [capture.Reader]
 // and writes them to the target format. The reader is consumed by the call;

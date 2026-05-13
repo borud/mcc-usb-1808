@@ -1,32 +1,35 @@
 # capture
 
-Binary file format for storing sampled data from USB-1808 devices.
-JSON header followed by fixed-width frames.  Optional zstd compression.
+Directory-based segmented capture format for USB-1808 devices.
+Each capture is a directory of ~100 MB segment files (`seg_NNNN.daq`),
+enabling crash resilience, parallel processing, and streaming writes.
 
-## File layout
+## Segment file layout
 
 ```
 Offset  Len   Field
 0       4     Magic: "DAQ\x00"
-4       1     Version (0x01)
-5       1     Flags (bit 0 = zstd compressed)
+4       1     Version (0x02)
+5       1     Flags (reserved, 0)
 6       4     Header length N (uint32 LE)
-10      N     Header (JSON, UTF-8)
-10+N    ...   Frame data
+10      8     Frame count (uint64 LE)
+18      2     Sequence number (uint16 LE)
+20      8     Global frame offset (uint64 LE)
+28      N     Header (JSON, UTF-8)
+28+N    ...   Frame data
 ```
 
-Frames are `len(channels) * sampleSize` bytes with no delimiters.
-Uncompressed files are directly seekable by frame index.
+Frames are `len(channels) * 4` bytes (RawUint32), no delimiters.
+Segments are directly seekable by frame index.
 
-## Data formats
+## Directory structure
 
-| Format              | Bytes/sample | Description                              |
-|---------------------|--------------|------------------------------------------|
-| `RawUint32`         | 4            | Raw 18-bit ADC / counter / digital codes |
-| `CalibratedFloat64` | 8            | Voltages as float64                      |
-
-Raw files are half the size.  Calibration coefficients in the header
-let `Frame.Values()` convert to voltages at read time.
+```
+capture_20260513_105712/
+  seg_0000.daq
+  seg_0001.daq
+  seg_0002.daq
+```
 
 ## Writing
 
@@ -43,42 +46,47 @@ h := capture.Header{
     Format:     capture.RawUint32,
 }
 
-w, _ := capture.NewWriter(f, h)
+w, _ := capture.NewWriter("capture_dir", h)
 defer w.Close()
 
-w.WriteFrame([]uint32{0x1FFFF, 0x0A})
+w.WriteBulk(rawBytes) // raw little-endian uint32 frame data from USB
 ```
 
-For `CalibratedFloat64` set `Format: capture.CalibratedFloat64` and use
-`WriteFrameFloat64([]float64{...})`.
+Only `WriteBulk` is supported — raw bytes are stored as-is without
+endianness conversion. Interpretation happens at read time.
 
 ### Writer options
 
 ```go
-capture.WithCompression(true)   // zstd-compress frame data (header stays plain)
-capture.WithBufferSize(4096)    // frames to buffer before flushing (default 1024)
+capture.WithFileSize(100*1024*1024) // target segment size (default 100 MB)
+capture.WithBufferSize(4096)        // frames to buffer before flushing (default 1024)
 ```
 
 ## Reading
 
 ```go
-r, _ := capture.NewReader(f)
+r, _ := capture.NewReader("capture_dir")
 defer r.Close()
 
 h := r.Header()
 
-// iterator
+// iterator — seamless across segments
 for frame, err := range r.Frames() {
-    vals := frame.Values()  // calibrated float64 regardless of storage format
+    vals := frame.Values()  // calibrated float64
 }
 
 // or manual
 frame, err := r.ReadFrame()  // returns io.EOF at end
-raw := frame.RawValues()     // []uint32, nil for float64 files
-vals := frame.Values()       // []float64, always available
+raw := frame.RawValues()     // []uint32
+vals := frame.Values()       // []float64, calibrated
+
+// random access across segments
+frames, err := r.ReadFrames(offset, count)
 ```
 
 `ReadFrame` reuses internal buffers — copy values you need to keep.
+
+Segment filtering: `capture.NewReader(dir, 1, 3)` reads only segments 1 and 3.
 
 ## Header fields
 
@@ -95,7 +103,9 @@ Optional: `FPGAVersion`, `CalibrationDate`, `FrameCount`, `Timestamp`,
 | `ErrUnsupportedVersion` | Newer version than supported           |
 | `ErrNoChannels`         | Empty channel list                     |
 | `ErrInvalidFormat`      | Unknown format or wrong write method   |
-| `ErrFrameSizeMismatch`  | Value count != channel count           |
+| `ErrNotDirectory`       | Path is not a directory                |
+| `ErrNoSegments`         | No segment files found                 |
+| `ErrSegmentMismatch`    | Inconsistent headers across segments   |
 | `ErrWriterClosed`       | Write after Close                      |
 | `ErrReaderClosed`       | Read after Close                       |
 
@@ -174,6 +184,22 @@ SELECT timestamp_s, voltage, current FROM frames WHERE voltage > 5.0;
 ```
 
 Inserts are batched in transactions of 1000 rows. Uses WAL journal mode.
+
+### Parquet
+
+```go
+f, _ := os.Create("data.parquet")
+defer f.Close()
+
+r, _ := capture.NewReader(captureFile)
+defer r.Close()
+
+export.Parquet(f, r, export.WithRaw())
+```
+
+Writes an Apache Parquet file with `frame_id`, `timestamp_s`, and one
+calibrated value column per channel. `export.WithRaw()` adds one `uint32` raw
+column per channel for `RawUint32` captures.
 
 ### WAV
 
