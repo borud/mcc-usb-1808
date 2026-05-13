@@ -266,7 +266,9 @@ export.WAV(wavWriter, reader)
 ### CSV
 
 Writes a `timestamp_s` column followed by one column per channel. Capture
-metadata is included as `#` comment lines before the data.
+metadata is included as `#` comment lines before the data. Channel columns use
+`Frame.Values()`: analog channels are calibrated voltages, while digital,
+counter, and encoder channels are raw values converted to `float64`.
 
 ### Excel
 
@@ -280,15 +282,19 @@ Creates three tables:
 
 - **metadata** -- key-value pairs of capture metadata
 - **channels** -- channel configuration (index, type, range, calibration)
-- **frames** -- one row per frame with `frame_id`, `timestamp_s`, and one column per channel
+- **frames** -- one row per frame with `frame_id`, `timestamp_s`, and one
+  value column per channel. Analog channel values are calibrated voltages;
+  digital, counter, and encoder values are raw values converted to `float64`.
 
 Inserts are batched in transactions of 1000 rows with WAL mode enabled.
 
 ### Parquet
 
 Writes an Apache Parquet file with `frame_id`, `timestamp_s`, and one
-calibrated value column per channel. Capture metadata and channel-to-column
-mapping are stored in Parquet key/value metadata.
+value column per channel. Analog channel values are calibrated voltages;
+digital, counter, and encoder values are raw values converted to `float64`.
+Capture metadata and channel-to-column mapping are stored in Parquet key/value
+metadata.
 
 Use `export.WithRaw()` to include an additional `uint32` raw column per channel
 for `RawUint32` captures.
