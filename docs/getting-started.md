@@ -5,18 +5,6 @@
 - Go 1.24 or later
 - libusb 1.0 development files
 
-### macOS
-
-```sh
-brew install libusb
-```
-
-### Debian / Ubuntu
-
-```sh
-apt install libusb-1.0-0-dev
-```
-
 ## Installation
 
 ```sh

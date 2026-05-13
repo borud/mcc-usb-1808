@@ -2,12 +2,6 @@
 
 The `daq` command-line tool provides quick access to all device subsystems.
 
-## Building
-
-```sh
-go build ./cmd/daq
-```
-
 ## Global Options
 
 | Flag           | Default | Description                         |
