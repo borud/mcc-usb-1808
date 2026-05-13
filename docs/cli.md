@@ -415,6 +415,12 @@ daq file export --format wav -o data.wav recording.daq
 | `--overwrite` | false   | Overwrite existing output file           |
 | `--raw`       | false   | Include raw sample columns where supported |
 
+WAV export writes 32-bit IEEE float PCM. It is scaled for visualization:
+analog channels are converted to calibrated voltages and then normalized
+independently to `[-1, +1]` by dividing by each channel's peak absolute value.
+Digital, counter, and encoder channels are divided by 262143. Use CSV, SQLite,
+Excel, or Parquet when you need absolute voltage values or raw sample codes.
+
 ## bench
 
 Benchmark USB scan throughput without file I/O overhead. Useful for isolating

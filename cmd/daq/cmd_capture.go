@@ -22,8 +22,8 @@ type captureCmd struct {
 	Count       int     `help:"Number of scans (0=continuous)." default:"0"`
 	Trigger     string  `help:"Trigger mode (${enum})." default:"none" enum:"none,rising,falling,high,low"`
 	Retrigger   uint32  `help:"Scans per trigger event (0=disabled)." default:"0"`
-	Out         string  `help:"Output file (default: capture_<timestamp>.daq)." short:"o"`
-	Compress    bool    `help:"Enable zstd compression." default:"false"`
+	Out         string  `help:"Output directory (default: capture_<timestamp>)." short:"o"`
+	FileSize    int     `help:"Target segment file size in bytes." default:"104857600"`
 	BufferSize  int     `help:"Frames to buffer before flushing." default:"8192"`
 	Pipeline    int     `help:"USB read-ahead pipeline depth (batches buffered)." default:"32"`
 	Description string  `help:"Free-form description stored in capture header." default:""`
@@ -46,7 +46,7 @@ func (c *captureCmd) Run(app *cli) error {
 	}
 
 	if c.Out == "" {
-		c.Out = fmt.Sprintf("capture_%s.daq", time.Now().Format("20060102_150405"))
+		c.Out = fmt.Sprintf("capture_%s", time.Now().Format("20060102_150405"))
 	}
 
 	dev, err := openAndInit(app)
@@ -99,23 +99,16 @@ func (c *captureCmd) Run(app *cli) error {
 		return fmt.Errorf("build header: %w", err)
 	}
 
-	// Open output file.
-	f, err := os.Create(c.Out)
-	if err != nil {
-		return fmt.Errorf("create output file: %w", err)
-	}
-	defer f.Close()
-
 	// Create capture writer.
 	var writerOpts []capture.WriterOption
-	if c.Compress {
-		writerOpts = append(writerOpts, capture.WithCompression(true))
+	if c.FileSize > 0 {
+		writerOpts = append(writerOpts, capture.WithFileSize(c.FileSize))
 	}
 	if c.BufferSize > 0 {
 		writerOpts = append(writerOpts, capture.WithBufferSize(c.BufferSize))
 	}
 
-	cw, err := capture.NewWriter(f, header, writerOpts...)
+	cw, err := capture.NewWriter(c.Out, header, writerOpts...)
 	if err != nil {
 		return fmt.Errorf("create writer: %w", err)
 	}
@@ -160,7 +153,7 @@ func (c *captureCmd) Run(app *cli) error {
 		PipelineDepth: c.Pipeline,
 	}
 
-	fmt.Fprintf(os.Stderr, "capturing to %s (%d channels, %.0f Hz, press Ctrl-C to stop)\n", c.Out, len(queue), c.Rate)
+	fmt.Fprintf(os.Stderr, "capturing to %s/ (%d channels, %.0f Hz, press Ctrl-C to stop)\n", c.Out, len(queue), c.Rate)
 
 	// Decouple disk I/O from the USB pipeline: the scan loop only
 	// copies data into a channel (memory-only), while a background

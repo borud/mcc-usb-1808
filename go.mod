@@ -5,7 +5,6 @@ go 1.24.9
 require github.com/alecthomas/kong v1.15.0
 
 require (
-	github.com/klauspost/compress v1.18.6
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/xuri/excelize/v2 v2.10.1
 	modernc.org/sqlite v1.46.0
@@ -15,6 +14,7 @@ require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/parquet-go/bitpack v1.0.0 // indirect

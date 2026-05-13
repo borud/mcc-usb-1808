@@ -71,7 +71,7 @@ func (b *benchCmd) Run(app *cli) error {
 	fmt.Fprintf(os.Stderr, "bench: %d ch, %.0f Hz/ch, %.0fs [%s]\n",
 		nCh, b.Rate, b.Duration, xferMode)
 
-	// Simulate capture command: signal handler, file, writer.
+	// Simulate capture command: signal handler, directory, writer.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 
@@ -90,11 +90,11 @@ func (b *benchCmd) Run(app *cli) error {
 		cancel()
 	}()
 
-	f, err := os.Create("/dev/null")
+	dir, err := os.MkdirTemp("", "bench-capture-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer os.RemoveAll(dir)
 
 	h := capture.Header{
 		Channels:   make([]capture.Channel, nCh),
@@ -104,7 +104,7 @@ func (b *benchCmd) Run(app *cli) error {
 	for i := range nCh {
 		h.Channels[i] = capture.Channel{Index: queue[i], Type: capture.AnalogIn}
 	}
-	cw, err := capture.NewWriter(f, h, capture.WithBufferSize(8192))
+	cw, err := capture.NewWriter(dir, h, capture.WithBufferSize(8192))
 	if err != nil {
 		return err
 	}

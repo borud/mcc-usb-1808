@@ -1,28 +1,25 @@
 package capture
 
 import (
-	"encoding/binary"
-	"encoding/json"
-	"io"
-
-	"github.com/klauspost/compress/zstd"
+	"fmt"
+	"os"
+	"path/filepath"
 )
 
-const defaultBufferFrames = 1024
+const (
+	defaultSegmentSize   = 100 * 1024 * 1024 // 100 MB
+)
 
 // WriterOption configures a [Writer].
 type WriterOption func(*writerConfig)
 
 type writerConfig struct {
 	bufferFrames int
-	compressed   bool
+	segmentSize  int
 }
 
 // WithBufferSize sets the number of frames to buffer before flushing to the
-// underlying writer. The actual byte buffer is bufferFrames * frameSize.
-// A larger buffer reduces the number of write syscalls and improves
-// throughput, especially for network or compressed output.
-// The default is 1024 frames.
+// underlying writer. The default is 1024 frames.
 func WithBufferSize(frames int) WriterOption {
 	return func(c *writerConfig) {
 		if frames > 0 {
@@ -31,141 +28,118 @@ func WithBufferSize(frames int) WriterOption {
 	}
 }
 
-// WithCompression enables zstd compression of frame data. The file header
-// is always uncompressed. Compression adds CPU overhead but can
-// significantly reduce file size for slowly-changing signals.
-func WithCompression(enabled bool) WriterOption {
+// WithFileSize sets the target uncompressed segment size in bytes. Segments
+// are rotated after approximately this many bytes of frame data. The actual
+// split point is calculated by frame count, so segments may be slightly
+// larger if a [Writer.WriteBulk] call straddles the boundary.
+// The default is 100 MB.
+func WithFileSize(bytes int) WriterOption {
 	return func(c *writerConfig) {
-		c.compressed = enabled
+		if bytes > 0 {
+			c.segmentSize = bytes
+		}
 	}
 }
 
-// Writer writes capture data to an [io.Writer].
+// Writer writes segmented capture data to a directory.
 //
-// Frames are buffered internally and flushed when the buffer is full or
-// when [Writer.Flush] or [Writer.Close] is called. The buffer size is a
-// configurable multiple of the frame size (see [WithBufferSize]).
+// Frames are split across segment files of roughly equal size. The next
+// segment file is pre-opened so that rotation does not stall the write
+// pipeline.
 //
-// A Writer must be closed after use to flush remaining data and finalize
-// any compression stream.
+// A Writer must be closed after use to finalize the last segment and
+// clean up any pre-opened pending files.
 //
 // Writer is NOT safe for concurrent use.
 type Writer struct {
-	w         io.Writer     // data destination (raw or zstd encoder)
-	raw       io.Writer     // original writer (for seeking back to patch frame count)
-	enc       *zstd.Encoder // non-nil when compressed
-	numCh         int
-	frameSize     int // bytes per frame (numCh * 4)
-	buf           []byte
-	bufUsed       int
-	framesWritten uint64
-	closed        bool
+	dir         string
+	header      Header
+	frameSize   int
+	maxFrames   uint64
+	bufFrames   int
+	current     *segmentWriter
+	next        *segmentWriter
+	seq         uint16
+	totalFrames uint64
+	closed      bool
 }
 
-// NewWriter creates a Writer that writes capture data to w.
+// NewWriter creates a Writer that writes segmented capture data to dir.
 //
-// The file preamble and JSON header are written immediately. Frame data
-// follows, optionally zstd-compressed.
+// The directory is created if it does not exist. The first segment file
+// is opened immediately, and a second segment is pre-opened for smooth
+// rotation.
 //
 // Returns [ErrNoChannels] if h.Channels is empty.
-// Returns [ErrInvalidFormat] if h.Format is not recognized.
-func NewWriter(w io.Writer, h Header, opts ...WriterOption) (*Writer, error) {
+// Returns [ErrInvalidFormat] if h.Format is not [RawUint32].
+func NewWriter(dir string, h Header, opts ...WriterOption) (*Writer, error) {
 	if len(h.Channels) == 0 {
 		return nil, ErrNoChannels
 	}
+	if h.Format != RawUint32 {
+		return nil, ErrInvalidFormat
+	}
 
-	cfg := writerConfig{bufferFrames: defaultBufferFrames}
+	cfg := writerConfig{
+		bufferFrames: defaultBufferFrames,
+		segmentSize:  defaultSegmentSize,
+	}
 	for _, o := range opts {
 		o(&cfg)
 	}
 
-	if h.Format != RawUint32 {
-		return nil, ErrInvalidFormat
-	}
-	const sampleSize = 4
+	const sampleBytes = 4
 	numCh := len(h.Channels)
-	frameSize := numCh * sampleSize
+	frameSize := numCh * sampleBytes
+	maxFrames := uint64(cfg.segmentSize / frameSize)
+	if maxFrames == 0 {
+		maxFrames = 1
+	}
 
-	// Encode header.
-	headerJSON, err := json.Marshal(h)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+
+	w := &Writer{
+		dir:       dir,
+		header:    h,
+		frameSize: frameSize,
+		maxFrames: maxFrames,
+		bufFrames: cfg.bufferFrames,
+	}
+
+	current, err := w.openSegment(0, 0)
 	if err != nil {
 		return nil, err
 	}
+	w.current = current
+	w.seq = 1
 
-	// Build and write preamble.
-	var flags uint8
-	if cfg.compressed {
-		flags |= flagCompressed
-	}
-
-	preamble := make([]byte, preambleLen)
-	copy(preamble, fileMagic)
-	preamble[4] = fileVersion
-	preamble[5] = flags
-	binary.LittleEndian.PutUint32(preamble[6:], uint32(len(headerJSON)))
-	// Frame count at offset 10 is left as 0 (unknown); patched by Close.
-
-	if _, err := w.Write(preamble); err != nil {
+	next, err := w.openSegment(1, maxFrames)
+	if err != nil {
+		current.closeRemoveIfEmpty()
 		return nil, err
 	}
-	if _, err := w.Write(headerJSON); err != nil {
-		return nil, err
-	}
+	w.next = next
+	w.seq = 2
 
-	// Set up optional compression.
-	dataWriter := w
-	var enc *zstd.Encoder
-	if cfg.compressed {
-		enc, err = zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.SpeedDefault))
-		if err != nil {
-			return nil, err
-		}
-		dataWriter = enc
-	}
-
-	return &Writer{
-		w:         dataWriter,
-		raw:       w,
-		enc:       enc,
-		numCh:     numCh,
-		frameSize: frameSize,
-		buf:       make([]byte, cfg.bufferFrames*frameSize),
-	}, nil
+	return w, nil
 }
 
-// WriteFrame writes one frame of raw uint32 values.
-//
-// Returns [ErrFrameSizeMismatch] if len(values) != len(channels).
-// Returns [ErrWriterClosed] if the writer has been closed.
-//
-// WriteFrame does not allocate after the Writer is constructed.
-func (w *Writer) WriteFrame(values []uint32) error {
-	if w.closed {
-		return ErrWriterClosed
-	}
-	if len(values) != w.numCh {
-		return ErrFrameSizeMismatch
-	}
-
-	if w.bufUsed+w.frameSize > len(w.buf) {
-		if err := w.Flush(); err != nil {
-			return err
-		}
-	}
-
-	for i, v := range values {
-		binary.LittleEndian.PutUint32(w.buf[w.bufUsed+i*4:], v)
-	}
-	w.bufUsed += w.frameSize
-	w.framesWritten++
-	return nil
+func (w *Writer) openSegment(seq uint16, globalOffset uint64) (*segmentWriter, error) {
+	name := fmt.Sprintf("seg_%04d.daq", seq)
+	finalPath := filepath.Join(w.dir, name)
+	pendingPath := finalPath + ".pending"
+	return newSegmentWriter(pendingPath, finalPath, w.header, seq, globalOffset, w.bufFrames)
 }
 
-// WriteBulk writes pre-formatted frame data directly into the buffer.
-// The caller must ensure data contains correctly formatted little-endian
-// uint32 samples (numCh samples per frame). This is the zero-copy fast
-// path for raw captures where USB bulk data is already in the target wire
-// format.
+// WriteBulk writes pre-formatted frame data directly. The caller must
+// ensure data contains correctly formatted little-endian uint32 samples
+// (numCh samples per frame). This is the zero-copy fast path for raw
+// captures where USB bulk data is already in the target wire format.
+//
+// The current segment may slightly exceed the target size to avoid
+// splitting a bulk write. Rotation happens after the write completes.
 //
 // Returns [ErrWriterClosed] if the writer has been closed.
 func (w *Writer) WriteBulk(data []byte) error {
@@ -173,85 +147,66 @@ func (w *Writer) WriteBulk(data []byte) error {
 		return ErrWriterClosed
 	}
 
-	w.framesWritten += uint64(len(data) / w.frameSize)
-	for len(data) > 0 {
-		space := len(w.buf) - w.bufUsed
-		if space == 0 {
-			if err := w.Flush(); err != nil {
-				return err
-			}
-			space = len(w.buf)
+	frames := uint64(len(data) / w.frameSize)
+	if err := w.current.writeBulk(data); err != nil {
+		return err
+	}
+	w.totalFrames += frames
+
+	if w.current.framesWritten >= w.maxFrames {
+		if err := w.rotate(); err != nil {
+			return err
 		}
-		n := min(len(data), space)
-		copy(w.buf[w.bufUsed:], data[:n])
-		w.bufUsed += n
-		data = data[n:]
 	}
 	return nil
 }
 
-// Flush writes any buffered frame data to the underlying writer.
+// Flush writes any buffered frame data in the current segment.
 // Returns [ErrWriterClosed] if the writer has been closed.
 func (w *Writer) Flush() error {
 	if w.closed {
 		return ErrWriterClosed
 	}
-	if w.bufUsed == 0 {
-		return nil
-	}
-	_, err := w.w.Write(w.buf[:w.bufUsed])
-	w.bufUsed = 0
-	return err
+	return w.current.flush()
 }
 
-// Close flushes any remaining buffered data and finalizes the compression
-// stream (if enabled). After Close, all subsequent calls return
-// [ErrWriterClosed].
-//
-// Close does NOT close the underlying [io.Writer].
+// Close finalizes the current segment, removes any unused pre-opened
+// segment, and marks the writer as closed. After Close, all subsequent
+// calls return [ErrWriterClosed].
 func (w *Writer) Close() error {
 	if w.closed {
 		return ErrWriterClosed
 	}
 	w.closed = true
 
-	if err := w.flush(); err != nil {
+	err := w.current.closeKeep()
+	w.next.closeRemoveIfEmpty()
+	return err
+}
+
+// FramesWritten returns the total number of frames written across all
+// segments. This is valid both during writing and after [Writer.Close].
+func (w *Writer) FramesWritten() uint64 {
+	return w.totalFrames
+}
+
+func (w *Writer) rotate() error {
+	if err := w.current.closeKeep(); err != nil {
 		return err
 	}
-	if w.enc != nil {
-		if err := w.enc.Close(); err != nil {
-			return err
-		}
+
+	w.current = w.next
+	// Patch the globalOffset to the actual total at rotation time,
+	// since the previous segment may have overshot maxFrames.
+	if err := w.current.patchGlobalOffset(w.totalFrames); err != nil {
+		return err
 	}
 
-	// Patch the frame count in the preamble if the underlying writer
-	// supports seeking. Non-seekable writers (pipes, network) keep the
-	// initial value of 0 (unknown).
-	if ws, ok := w.raw.(io.WriteSeeker); ok {
-		var buf [8]byte
-		binary.LittleEndian.PutUint64(buf[:], w.framesWritten)
-		if _, err := ws.Seek(frameCountOff, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := ws.Write(buf[:]); err != nil {
-			return err
-		}
+	next, err := w.openSegment(w.seq, w.totalFrames+w.maxFrames)
+	if err != nil {
+		return err
 	}
+	w.next = next
+	w.seq++
 	return nil
-}
-
-// FramesWritten returns the number of frames successfully written so far.
-// This is valid both during writing and after [Writer.Close].
-func (w *Writer) FramesWritten() uint64 {
-	return w.framesWritten
-}
-
-// flush is the internal flush that works even after closed is set (used by Close).
-func (w *Writer) flush() error {
-	if w.bufUsed == 0 {
-		return nil
-	}
-	_, err := w.w.Write(w.buf[:w.bufUsed])
-	w.bufUsed = 0
-	return err
 }

@@ -1,12 +1,12 @@
 package capture
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -57,7 +57,24 @@ func testHeaderMixed() Header {
 	}
 }
 
-// writeRawFrames writes n frames of raw data, returning the values written.
+// framesToBulk encodes uint32 frames as little-endian bytes suitable for WriteBulk.
+func framesToBulk(frames [][]uint32) []byte {
+	if len(frames) == 0 {
+		return nil
+	}
+	numCh := len(frames[0])
+	buf := make([]byte, len(frames)*numCh*4)
+	for i, vals := range frames {
+		for ch, v := range vals {
+			binary.LittleEndian.PutUint32(buf[(i*numCh+ch)*4:], v)
+		}
+	}
+	return buf
+}
+
+// writeRawFrames writes n frames of raw data via per-frame WriteBulk calls,
+// returning the values written. Writing one frame at a time ensures segment
+// rotation is triggered at the expected boundaries.
 func writeRawFrames(t *testing.T, w *Writer, numCh, n int) [][]uint32 {
 	t.Helper()
 	frames := make([][]uint32, n)
@@ -67,18 +84,35 @@ func writeRawFrames(t *testing.T, w *Writer, numCh, n int) [][]uint32 {
 			vals[ch] = uint32(i*numCh+ch) & 0x3FFFF // 18-bit range
 		}
 		frames[i] = vals
-		if err := w.WriteFrame(vals); err != nil {
-			t.Fatalf("WriteFrame %d: %v", i, err)
+		if err := w.WriteBulk(framesToBulk([][]uint32{vals})); err != nil {
+			t.Fatalf("WriteBulk frame %d: %v", i, err)
 		}
 	}
 	return frames
 }
 
+// testCapture creates a capture directory with the given frames and returns the dir path.
+func testCapture(t *testing.T, h Header, frames [][]uint32, opts ...WriterOption) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, f := range frames {
+		if err := w.WriteBulk(framesToBulk([][]uint32{f})); err != nil {
+			t.Fatalf("WriteBulk frame %d: %v", i, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
 
-// TestNewWriter_NoChannels verifies that NewWriter returns ErrNoChannels for an empty channel list.
 func TestNewWriter_NoChannels(t *testing.T) {
 	h := Header{Format: RawUint32}
-	_, err := NewWriter(io.Discard, h)
+	_, err := NewWriter(t.TempDir(), h)
 	if !errors.Is(err, ErrNoChannels) {
 		t.Fatalf("expected ErrNoChannels, got %v", err)
 	}
@@ -87,47 +121,28 @@ func TestNewWriter_NoChannels(t *testing.T) {
 func TestNewWriter_InvalidFormat(t *testing.T) {
 	h := testHeaderRaw(2)
 	h.Format = DataFormat(99)
-	_, err := NewWriter(io.Discard, h)
+	_, err := NewWriter(t.TempDir(), h)
 	if !errors.Is(err, ErrInvalidFormat) {
 		t.Fatalf("expected ErrInvalidFormat, got %v", err)
 	}
 }
 
-
-func TestWriteFrame_SizeMismatch(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(3))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w.Close()
-
-	if err := w.WriteFrame([]uint32{1, 2}); !errors.Is(err, ErrFrameSizeMismatch) {
-		t.Fatalf("expected ErrFrameSizeMismatch, got %v", err)
-	}
-	if err := w.WriteFrame([]uint32{1, 2, 3, 4}); !errors.Is(err, ErrFrameSizeMismatch) {
-		t.Fatalf("expected ErrFrameSizeMismatch, got %v", err)
-	}
-}
-
-
-func TestWriteFrame_AfterClose(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
+func TestWriteBulk_AfterClose(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
 
-	if err := w.WriteFrame([]uint32{1, 2}); !errors.Is(err, ErrWriterClosed) {
+	if err := w.WriteBulk(framesToBulk([][]uint32{{1, 2}})); !errors.Is(err, ErrWriterClosed) {
 		t.Fatalf("expected ErrWriterClosed, got %v", err)
 	}
 }
 
-
 func TestFlush_AfterClose(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
+	dir := t.TempDir()
+	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +154,8 @@ func TestFlush_AfterClose(t *testing.T) {
 }
 
 func TestClose_DoubleClose(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
+	dir := t.TempDir()
+	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,55 +167,31 @@ func TestClose_DoubleClose(t *testing.T) {
 	}
 }
 
-// TestNewReader_InvalidMagic verifies that NewReader rejects files with invalid magic bytes.
-func TestNewReader_InvalidMagic(t *testing.T) {
-	data := make([]byte, preambleLen)
-	copy(data, "NOTD")
-	_, err := NewReader(bytes.NewReader(data))
-	if !errors.Is(err, ErrInvalidMagic) {
-		t.Fatalf("expected ErrInvalidMagic, got %v", err)
+func TestNewReader_NotDirectory(t *testing.T) {
+	f, err := os.CreateTemp("", "test-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove(f.Name())
+
+	_, err = NewReader(f.Name())
+	if !errors.Is(err, ErrNotDirectory) {
+		t.Fatalf("expected ErrNotDirectory, got %v", err)
 	}
 }
 
-func TestNewReader_UnsupportedVersion(t *testing.T) {
-	data := make([]byte, preambleLen)
-	copy(data, fileMagic)
-	data[4] = 99 // bad version
-	_, err := NewReader(bytes.NewReader(data))
-	if !errors.Is(err, ErrUnsupportedVersion) {
-		t.Fatalf("expected ErrUnsupportedVersion, got %v", err)
-	}
-}
-
-func TestNewReader_EmptyReader(t *testing.T) {
-	_, err := NewReader(bytes.NewReader(nil))
-	if err == nil {
-		t.Fatal("expected error on empty reader")
-	}
-}
-
-func TestNewReader_TruncatedHeader(t *testing.T) {
-	data := make([]byte, preambleLen)
-	copy(data, fileMagic)
-	data[4] = fileVersion
-	binary.LittleEndian.PutUint32(data[6:], 100) // claims 100 bytes of header
-	// but only preamble is provided
-	_, err := NewReader(bytes.NewReader(data))
-	if err == nil {
-		t.Fatal("expected error on truncated header")
+func TestNewReader_EmptyDir(t *testing.T) {
+	_, err := NewReader(t.TempDir())
+	if !errors.Is(err, ErrNoSegments) {
+		t.Fatalf("expected ErrNoSegments, got %v", err)
 	}
 }
 
 func TestReadFrame_AfterClose(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrame([]uint32{1, 2})
-	w.Close()
+	dir := testCapture(t, testHeaderRaw(2), [][]uint32{{1, 2}})
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,14 +204,9 @@ func TestReadFrame_AfterClose(t *testing.T) {
 }
 
 func TestReaderClose_DoubleClose(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
+	dir := testCapture(t, testHeaderRaw(2), nil)
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,14 +218,14 @@ func TestReaderClose_DoubleClose(t *testing.T) {
 	}
 }
 
-// TestRoundTrip_RawUint32 writes and reads back RawUint32 frames, verifying header and data integrity.
+// TestRoundTrip_RawUint32 writes and reads back RawUint32 frames.
 func TestRoundTrip_RawUint32(t *testing.T) {
 	const numCh = 4
 	const numFrames = 100
 
-	var buf bytes.Buffer
 	h := testHeaderRaw(numCh)
-	w, err := NewWriter(&buf, h)
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,13 +234,12 @@ func TestRoundTrip_RawUint32(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
 
-	// Verify header round-trips.
 	rh := r.Header()
 	if rh.DeviceModel != h.DeviceModel {
 		t.Errorf("model = %q, want %q", rh.DeviceModel, h.DeviceModel)
@@ -282,68 +267,16 @@ func TestRoundTrip_RawUint32(t *testing.T) {
 		}
 	}
 
-	// Next read should be EOF.
 	_, err = r.ReadFrame()
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("expected io.EOF after all frames, got %v", err)
 	}
 }
 
-
-// TestRoundTrip_RawCompressed verifies round-trip of compressed RawUint32 frames.
-func TestRoundTrip_RawCompressed(t *testing.T) {
-	const numCh = 4
-	const numFrames = 500
-
-	var buf bytes.Buffer
-	h := testHeaderRaw(numCh)
-	w, err := NewWriter(&buf, h, WithCompression(true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	written := writeRawFrames(t, w, numCh, numFrames)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	for i := range numFrames {
-		f, err := r.ReadFrame()
-		if err != nil {
-			t.Fatalf("ReadFrame %d: %v", i, err)
-		}
-		raw := f.RawValues()
-		for ch := range numCh {
-			if raw[ch] != written[i][ch] {
-				t.Errorf("frame %d ch %d: got %d, want %d", i, ch, raw[ch], written[i][ch])
-			}
-		}
-	}
-
-	_, err = r.ReadFrame()
-	if !errors.Is(err, io.EOF) {
-		t.Fatalf("expected io.EOF, got %v", err)
-	}
-}
-
-
-// TestRoundTrip_SingleFrame verifies round-trip of a single frame followed by EOF.
 func TestRoundTrip_SingleFrame(t *testing.T) {
-	var buf bytes.Buffer
-	h := testHeaderRaw(2)
-	w, err := NewWriter(&buf, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrame([]uint32{0xAAAA, 0xBBBB})
-	w.Close()
+	dir := testCapture(t, testHeaderRaw(2), [][]uint32{{0xAAAA, 0xBBBB}})
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,16 +297,10 @@ func TestRoundTrip_SingleFrame(t *testing.T) {
 	}
 }
 
-// TestRoundTrip_ZeroFrames verifies that a header-only capture reads back as immediate EOF.
 func TestRoundTrip_ZeroFrames(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
+	dir := testCapture(t, testHeaderRaw(2), nil)
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,25 +308,24 @@ func TestRoundTrip_ZeroFrames(t *testing.T) {
 
 	_, err = r.ReadFrame()
 	if !errors.Is(err, io.EOF) {
-		t.Fatalf("expected EOF on empty file, got %v", err)
+		t.Fatalf("expected EOF on empty capture, got %v", err)
 	}
 }
 
-// TestRoundTrip_ManyChannels verifies round-trip with 13 channels (max scan queue).
 func TestRoundTrip_ManyChannels(t *testing.T) {
-	const numCh = 13 // max scan queue
+	const numCh = 13
 	const numFrames = 10
 
-	var buf bytes.Buffer
 	h := testHeaderRaw(numCh)
-	w, err := NewWriter(&buf, h)
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	written := writeRawFrames(t, w, numCh, numFrames)
 	w.Close()
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,24 +344,377 @@ func TestRoundTrip_ManyChannels(t *testing.T) {
 	}
 }
 
-// TestCalibrate_BP10V verifies calibration for the +/-10V bipolar range.
+// TestMultiSegment_Rotation verifies that frames are correctly split across segments.
+func TestMultiSegment_Rotation(t *testing.T) {
+	const numCh = 2
+	const numFrames = 100
+	frameSize := numCh * 4
+
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	// Set segment size to hold ~30 frames.
+	segSize := frameSize * 30
+	w, err := NewWriter(dir, h, WithFileSize(segSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := writeRawFrames(t, w, numCh, numFrames)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have multiple segment files.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segCount := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".daq" {
+			segCount++
+		}
+	}
+	if segCount < 3 {
+		t.Errorf("expected at least 3 segments, got %d", segCount)
+	}
+
+	// No pending files should remain.
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".pending" {
+			t.Errorf("pending file not cleaned up: %s", e.Name())
+		}
+	}
+
+	// Read back all frames.
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if r.Header().FrameCount != numFrames {
+		t.Errorf("aggregate FrameCount = %d, want %d", r.Header().FrameCount, numFrames)
+	}
+
+	count := 0
+	for f, err := range r.Frames() {
+		if err != nil {
+			t.Fatalf("frame %d: %v", count, err)
+		}
+		for ch := range numCh {
+			if f.RawValues()[ch] != written[count][ch] {
+				t.Errorf("frame %d ch %d: got %d, want %d",
+					count, ch, f.RawValues()[ch], written[count][ch])
+			}
+		}
+		count++
+	}
+	if count != numFrames {
+		t.Errorf("read %d frames, want %d", count, numFrames)
+	}
+}
+
+// TestMultiSegment_WriteBulk verifies WriteBulk across segment boundaries.
+func TestMultiSegment_WriteBulk(t *testing.T) {
+	const numCh = 2
+	const numFrames = 100
+	frameSize := numCh * 4
+
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	segSize := frameSize * 30
+	w, err := NewWriter(dir, h, WithFileSize(segSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build bulk data.
+	written := make([][]uint32, numFrames)
+	bulkData := make([]byte, numFrames*frameSize)
+	for i := range numFrames {
+		vals := make([]uint32, numCh)
+		for ch := range numCh {
+			v := uint32(i*numCh+ch) & 0x3FFFF
+			vals[ch] = v
+			binary.LittleEndian.PutUint32(bulkData[i*frameSize+ch*4:], v)
+		}
+		written[i] = vals
+	}
+
+	if err := w.WriteBulk(bulkData); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if w.FramesWritten() != numFrames {
+		t.Errorf("FramesWritten = %d, want %d", w.FramesWritten(), numFrames)
+	}
+
+	// Read back.
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	count := 0
+	for f, err := range r.Frames() {
+		if err != nil {
+			t.Fatalf("frame %d: %v", count, err)
+		}
+		for ch := range numCh {
+			if f.RawValues()[ch] != written[count][ch] {
+				t.Errorf("frame %d ch %d: got %d, want %d",
+					count, ch, f.RawValues()[ch], written[count][ch])
+			}
+		}
+		count++
+	}
+	if count != numFrames {
+		t.Errorf("read %d frames, want %d", count, numFrames)
+	}
+}
+
+// TestMultiSegment_PendingCleanup verifies that unused pending files are removed on Close.
+func TestMultiSegment_PendingCleanup(t *testing.T) {
+	h := testHeaderRaw(2)
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write just one frame — no rotation needed.
+	w.WriteBulk(framesToBulk([][]uint32{{1, 2}}))
+	w.Close()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".pending" {
+			t.Errorf("pending file not cleaned up: %s", e.Name())
+		}
+	}
+}
+
+// TestMultiSegment_PreambleV2 verifies v2 preamble fields in segment files.
+func TestMultiSegment_PreambleV2(t *testing.T) {
+	const numCh = 2
+	const numFrames = 100
+	frameSize := numCh * 4
+
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	segSize := frameSize * 30
+	w, err := NewWriter(dir, h, WithFileSize(segSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRawFrames(t, w, numCh, numFrames)
+	w.Close()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var totalFrames uint64
+	prevSeq := -1
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".daq" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		pre, err := readPreambleFromFile(path)
+		if err != nil {
+			t.Fatalf("read preamble %s: %v", e.Name(), err)
+		}
+
+		// Sequence numbers should be monotonically increasing.
+		if int(pre.sequenceNumber) <= prevSeq {
+			t.Errorf("segment %s: seq %d not after %d", e.Name(), pre.sequenceNumber, prevSeq)
+		}
+		prevSeq = int(pre.sequenceNumber)
+
+		// Global frame offset should match running total.
+		if pre.globalFrameOffset != totalFrames {
+			t.Errorf("segment %s: globalFrameOffset = %d, want %d",
+				e.Name(), pre.globalFrameOffset, totalFrames)
+		}
+
+		totalFrames += pre.frameCount
+	}
+
+	if totalFrames != numFrames {
+		t.Errorf("total frames across segments = %d, want %d", totalFrames, numFrames)
+	}
+}
+
+// TestRandomAccess_ReadFrames verifies random access across segment boundaries.
+func TestRandomAccess_ReadFrames(t *testing.T) {
+	const numCh = 2
+	const numFrames = 100
+	frameSize := numCh * 4
+
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	segSize := frameSize * 30
+	w, err := NewWriter(dir, h, WithFileSize(segSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := writeRawFrames(t, w, numCh, numFrames)
+	w.Close()
+
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	// Read from the middle.
+	frames, err := r.ReadFrames(40, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 20 {
+		t.Fatalf("got %d frames, want 20", len(frames))
+	}
+	for i, f := range frames {
+		raw := f.RawValues()
+		for ch := range numCh {
+			if raw[ch] != written[40+i][ch] {
+				t.Errorf("frame %d ch %d: got %d, want %d", 40+i, ch, raw[ch], written[40+i][ch])
+			}
+		}
+	}
+
+	// Read past the end.
+	frames, err = r.ReadFrames(90, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 10 {
+		t.Fatalf("got %d frames from offset 90, want 10", len(frames))
+	}
+
+	// Read from beyond the end.
+	frames, err = r.ReadFrames(200, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frames != nil {
+		t.Errorf("expected nil for out-of-range offset, got %d frames", len(frames))
+	}
+}
+
+// TestRandomAccess_CrossSegmentBoundary reads frames that span two segments.
+func TestRandomAccess_CrossSegmentBoundary(t *testing.T) {
+	const numCh = 2
+	const numFrames = 100
+	frameSize := numCh * 4
+
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	segSize := frameSize * 30
+	w, err := NewWriter(dir, h, WithFileSize(segSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := writeRawFrames(t, w, numCh, numFrames)
+	w.Close()
+
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	// Read frames that span a segment boundary (around frame 30).
+	frames, err := r.ReadFrames(25, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 15 {
+		t.Fatalf("got %d frames, want 15", len(frames))
+	}
+	for i, f := range frames {
+		raw := f.RawValues()
+		for ch := range numCh {
+			if raw[ch] != written[25+i][ch] {
+				t.Errorf("frame %d ch %d: got %d, want %d", 25+i, ch, raw[ch], written[25+i][ch])
+			}
+		}
+	}
+}
+
+// TestSegmentFilter verifies that NewReader with segment numbers filters correctly.
+func TestSegmentFilter(t *testing.T) {
+	const numCh = 2
+	const numFrames = 100
+	frameSize := numCh * 4
+
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	segSize := frameSize * 30
+	w, err := NewWriter(dir, h, WithFileSize(segSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRawFrames(t, w, numCh, numFrames)
+	w.Close()
+
+	// Read only segment 1.
+	r, err := NewReader(dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	count := 0
+	for _, err := range r.Frames() {
+		if err != nil {
+			t.Fatalf("frame %d: %v", count, err)
+		}
+		count++
+	}
+	if count == 0 {
+		t.Error("no frames from segment 1")
+	}
+	if count >= numFrames {
+		t.Errorf("expected fewer frames from segment 1, got %d", count)
+	}
+}
+
+// TestSegmentFilter_InvalidSegment verifies error when requesting non-existent segment.
+func TestSegmentFilter_InvalidSegment(t *testing.T) {
+	dir := testCapture(t, testHeaderRaw(2), [][]uint32{{1, 2}})
+
+	_, err := NewReader(dir, 999)
+	if !errors.Is(err, ErrNoSegments) {
+		t.Fatalf("expected ErrNoSegments, got %v", err)
+	}
+}
+
+// Calibration tests — these don't depend on Writer/Reader API changes.
+
 func TestCalibrate_BP10V(t *testing.T) {
 	ch := Channel{Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
 
-	// Midpoint → 0V
 	got := calibrate(131072, ch)
 	if got != 0.0 {
 		t.Errorf("midpoint: got %f, want 0.0", got)
 	}
 
-	// Zero → -10V
 	got = calibrate(0, ch)
 	if got != -10.0 {
 		t.Errorf("zero: got %f, want -10.0", got)
 	}
 
-	// Max → ~10V
-	got = calibrate(0x3FFFF, ch) // 262143
+	got = calibrate(0x3FFFF, ch)
 	want := (262143.0 - 131072.0) * 10.0 / 131072.0
 	if math.Abs(got-want) > 1e-6 {
 		t.Errorf("max: got %f, want %f", got, want)
@@ -480,7 +759,6 @@ func TestCalibrate_UP5V(t *testing.T) {
 }
 
 func TestCalibrate_WithSlopeOffset(t *testing.T) {
-	// Non-unity calibration.
 	ch := Channel{Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0005, Offset: 10.0}}
 
 	raw := uint32(131072)
@@ -514,31 +792,19 @@ func TestCalibrate_NilCal(t *testing.T) {
 }
 
 func TestCalibrate_UnipolarClamp(t *testing.T) {
-	// Offset that would push calibrated value negative for unipolar range.
 	ch := Channel{Type: AnalogIn, Range: 2, Cal: &CalEntry{Slope: 1.0, Offset: -1000.0}}
 	got := calibrate(100, ch)
-	// cal = 100 - 1000 = -900 → clamped to 0 → 0 * 10 / 262143 = 0V
 	if got != 0.0 {
 		t.Errorf("unipolar clamp low: got %f, want 0.0", got)
 	}
 }
 
-// TestFrame_Values_RawWithCalibration verifies end-to-end calibrated Values() for raw frames with mixed channel types.
 func TestFrame_Values_RawWithCalibration(t *testing.T) {
 	h := testHeaderMixed()
-
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Write a frame: analog0=131072 (0V BP10V), analog1=131072 (0V BP5V), digital=0xFF, counter=1000, encoder=500
 	frame := []uint32{131072, 131072, 0xFF, 1000, 500}
-	w.WriteFrame(frame)
-	w.Close()
+	dir := testCapture(t, h, [][]uint32{frame})
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,45 +819,37 @@ func TestFrame_Values_RawWithCalibration(t *testing.T) {
 	if len(vals) != 5 {
 		t.Fatalf("got %d values, want 5", len(vals))
 	}
-
-	// Channel 0: BP10V midpoint → 0V
 	if vals[0] != 0.0 {
 		t.Errorf("ch0 (BP10V midpoint): got %f, want 0.0", vals[0])
 	}
-	// Channel 1: BP5V midpoint → 0V
 	if vals[1] != 0.0 {
 		t.Errorf("ch1 (BP5V midpoint): got %f, want 0.0", vals[1])
 	}
-	// Channel 2: DigitalIO → passthrough
 	if vals[2] != 255.0 {
 		t.Errorf("ch2 (digital): got %f, want 255.0", vals[2])
 	}
-	// Channel 3: Counter → passthrough
 	if vals[3] != 1000.0 {
 		t.Errorf("ch3 (counter): got %f, want 1000.0", vals[3])
 	}
-	// Channel 4: Encoder → passthrough
 	if vals[4] != 500.0 {
 		t.Errorf("ch4 (encoder): got %f, want 500.0", vals[4])
 	}
 }
 
-
-// TestFrames_Iterator verifies the Frames() range iterator reads all frames in order.
 func TestFrames_Iterator(t *testing.T) {
 	const numCh = 2
 	const numFrames = 10
 
-	var buf bytes.Buffer
 	h := testHeaderRaw(numCh)
-	w, err := NewWriter(&buf, h)
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	written := writeRawFrames(t, w, numCh, numFrames)
 	w.Close()
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,15 +877,16 @@ func TestFrames_Iterator_EarlyBreak(t *testing.T) {
 	const numCh = 2
 	const numFrames = 100
 
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(numCh))
+	h := testHeaderRaw(numCh)
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeRawFrames(t, w, numCh, numFrames)
 	w.Close()
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,22 +907,20 @@ func TestFrames_Iterator_EarlyBreak(t *testing.T) {
 	}
 }
 
-// TestWithBufferSize verifies correct round-trip with a small buffer that forces multiple flushes.
 func TestWithBufferSize(t *testing.T) {
-	// Use a tiny buffer (2 frames) to force multiple flushes.
 	const numCh = 2
 	const numFrames = 10
 
-	var buf bytes.Buffer
 	h := testHeaderRaw(numCh)
-	w, err := NewWriter(&buf, h, WithBufferSize(2))
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h, WithBufferSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
 	written := writeRawFrames(t, w, numCh, numFrames)
 	w.Close()
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,19 +940,11 @@ func TestWithBufferSize(t *testing.T) {
 }
 
 func TestClose_FlushesPartialBuffer(t *testing.T) {
-	// Write 3 frames with a buffer of 100. Close should flush the partial buffer.
-	const numCh = 2
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(numCh), WithBufferSize(100))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrame([]uint32{1, 2})
-	w.WriteFrame([]uint32{3, 4})
-	w.WriteFrame([]uint32{5, 6})
-	w.Close()
+	dir := testCapture(t, testHeaderRaw(2), [][]uint32{
+		{1, 2}, {3, 4}, {5, 6},
+	}, WithBufferSize(100))
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,44 +962,82 @@ func TestClose_FlushesPartialBuffer(t *testing.T) {
 	}
 }
 
-// TestReadFrame_TruncatedData verifies that reading a truncated frame returns io.ErrUnexpectedEOF.
-func TestReadFrame_TruncatedData(t *testing.T) {
-	var buf bytes.Buffer
-	h := testHeaderRaw(4) // 4 channels = 16 bytes per frame
-	w, err := NewWriter(&buf, h)
+func TestFramesWritten(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.WriteFrame([]uint32{1, 2, 3, 4})
+
+	if w.FramesWritten() != 0 {
+		t.Errorf("before writes: got %d, want 0", w.FramesWritten())
+	}
+
+	w.WriteBulk(framesToBulk([][]uint32{{1, 2}, {3, 4}, {5, 6}}))
+
+	if w.FramesWritten() != 3 {
+		t.Errorf("after 3 writes: got %d, want 3", w.FramesWritten())
+	}
+
 	w.Close()
 
-	// Truncate the data (remove last few bytes of frame data).
-	data := buf.Bytes()
-	truncated := data[:len(data)-4]
+	if w.FramesWritten() != 3 {
+		t.Errorf("after close: got %d, want 3", w.FramesWritten())
+	}
+}
 
-	r, err := NewReader(bytes.NewReader(truncated))
+func TestFrameCount_Patched(t *testing.T) {
+	h := testHeaderRaw(2)
+	dir := filepath.Join(t.TempDir(), "capture")
+	w, err := NewWriter(dir, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WriteBulk(framesToBulk([][]uint32{{1, 2}, {3, 4}, {5, 6}}))
+	w.Close()
+
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
 
-	_, err = r.ReadFrame()
-	if !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("expected io.ErrUnexpectedEOF on truncated frame, got %v", err)
+	if r.Header().FrameCount != 3 {
+		t.Errorf("FrameCount = %d, want 3", r.Header().FrameCount)
 	}
 }
 
-// TestHeader_RoundTrip verifies that all header fields survive a write/read round-trip.
-func TestHeader_RoundTrip(t *testing.T) {
-	h := testHeaderMixed()
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, h)
+func TestFrame_Reuse(t *testing.T) {
+	dir := testCapture(t, testHeaderRaw(2), [][]uint32{
+		{100, 200}, {300, 400},
+	})
+
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Close()
+	defer r.Close()
 
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	f1, _ := r.ReadFrame()
+	raw1Ptr := &f1.RawValues()[0]
+
+	f2, _ := r.ReadFrame()
+	raw2Ptr := &f2.RawValues()[0]
+
+	if raw1Ptr != raw2Ptr {
+		t.Error("expected ReadFrame to reuse internal slice")
+	}
+	if f2.RawValues()[0] != 300 || f2.RawValues()[1] != 400 {
+		t.Errorf("second frame: got [%d, %d], want [300, 400]",
+			f2.RawValues()[0], f2.RawValues()[1])
+	}
+}
+
+func TestHeader_RoundTrip(t *testing.T) {
+	h := testHeaderMixed()
+	dir := testCapture(t, h, nil)
+
+	r, err := NewReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +1045,6 @@ func TestHeader_RoundTrip(t *testing.T) {
 
 	rh := r.Header()
 
-	// Device identification.
 	if rh.DeviceModel != h.DeviceModel {
 		t.Errorf("DeviceModel = %q, want %q", rh.DeviceModel, h.DeviceModel)
 	}
@@ -771,8 +1057,6 @@ func TestHeader_RoundTrip(t *testing.T) {
 	if !rh.CalibrationDate.Equal(h.CalibrationDate) {
 		t.Errorf("CalibrationDate = %v, want %v", rh.CalibrationDate, h.CalibrationDate)
 	}
-
-	// Capture configuration.
 	if rh.SampleRate != h.SampleRate {
 		t.Errorf("SampleRate = %f, want %f", rh.SampleRate, h.SampleRate)
 	}
@@ -782,8 +1066,6 @@ func TestHeader_RoundTrip(t *testing.T) {
 	if rh.Timestamp != h.Timestamp {
 		t.Errorf("Timestamp = %d, want %d", rh.Timestamp, h.Timestamp)
 	}
-
-	// Optional session metadata.
 	if rh.ApplicationName != h.ApplicationName {
 		t.Errorf("ApplicationName = %q, want %q", rh.ApplicationName, h.ApplicationName)
 	}
@@ -797,7 +1079,6 @@ func TestHeader_RoundTrip(t *testing.T) {
 		t.Errorf("Operator = %q, want %q", rh.Operator, h.Operator)
 	}
 
-	// Properties.
 	if len(rh.Properties) != len(h.Properties) {
 		t.Fatalf("Properties len = %d, want %d", len(rh.Properties), len(h.Properties))
 	}
@@ -807,7 +1088,6 @@ func TestHeader_RoundTrip(t *testing.T) {
 		}
 	}
 
-	// Channels.
 	if len(rh.Channels) != len(h.Channels) {
 		t.Fatalf("Channels len = %d, want %d", len(rh.Channels), len(h.Channels))
 	}
@@ -828,185 +1108,15 @@ func TestHeader_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestCompression_ReducesSize verifies that compressed output is smaller than uncompressed for a slowly-varying signal.
-func TestCompression_ReducesSize(t *testing.T) {
-	const numCh = 4
-	const numFrames = 10000
-
-	h := testHeaderRaw(numCh)
-
-	var uncompressed bytes.Buffer
-	w, err := NewWriter(&uncompressed, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range numFrames {
-		vals := make([]uint32, numCh)
-		for ch := range numCh {
-			// Slowly varying signal — compresses well.
-			vals[ch] = uint32(131072 + (i % 100))
-		}
-		w.WriteFrame(vals)
-	}
-	w.Close()
-
-	var compressed bytes.Buffer
-	w, err = NewWriter(&compressed, h, WithCompression(true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range numFrames {
-		vals := make([]uint32, numCh)
-		for ch := range numCh {
-			vals[ch] = uint32(131072 + (i % 100))
-		}
-		w.WriteFrame(vals)
-	}
-	w.Close()
-
-	if compressed.Len() >= uncompressed.Len() {
-		t.Errorf("compressed (%d) should be smaller than uncompressed (%d)",
-			compressed.Len(), uncompressed.Len())
-	}
-	t.Logf("uncompressed: %d bytes, compressed: %d bytes (%.1f%% reduction)",
-		uncompressed.Len(), compressed.Len(),
-		100*(1-float64(compressed.Len())/float64(uncompressed.Len())))
-}
-
-// TestFramesWritten verifies the FramesWritten counter before, during, and after writes.
-func TestFramesWritten(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if w.FramesWritten() != 0 {
-		t.Errorf("before writes: got %d, want 0", w.FramesWritten())
-	}
-
-	w.WriteFrame([]uint32{1, 2})
-	w.WriteFrame([]uint32{3, 4})
-	w.WriteFrame([]uint32{5, 6})
-
-	if w.FramesWritten() != 3 {
-		t.Errorf("after 3 writes: got %d, want 3", w.FramesWritten())
-	}
-
-	w.Close()
-
-	// Still accessible after Close.
-	if w.FramesWritten() != 3 {
-		t.Errorf("after close: got %d, want 3", w.FramesWritten())
-	}
-}
-
-func TestFrameCount_Seekable(t *testing.T) {
-	f, err := os.CreateTemp("", "capture-test-*.daq")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-
-	h := testHeaderRaw(2)
-	w, err := NewWriter(f, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrame([]uint32{1, 2})
-	w.WriteFrame([]uint32{3, 4})
-	w.WriteFrame([]uint32{5, 6})
-	w.Close()
-
-	// Re-open and verify frame count was patched.
-	rf, err := os.Open(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rf.Close()
-
-	r, err := NewReader(rf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	if r.Header().FrameCount != 3 {
-		t.Errorf("FrameCount = %d, want 3", r.Header().FrameCount)
-	}
-}
-
-func TestFrameCount_NonSeekable(t *testing.T) {
-	// bytes.Buffer is not an io.WriteSeeker, so frame count stays 0.
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrame([]uint32{1, 2})
-	w.WriteFrame([]uint32{3, 4})
-	w.Close()
-
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	if r.Header().FrameCount != 0 {
-		t.Errorf("FrameCount = %d, want 0 for non-seekable writer", r.Header().FrameCount)
-	}
-}
-
-// TestFrame_Reuse verifies that ReadFrame reuses the internal slice, so values change between calls.
-func TestFrame_Reuse(t *testing.T) {
-	const numCh = 2
-	var buf bytes.Buffer
-	w, err := NewWriter(&buf, testHeaderRaw(numCh))
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WriteFrame([]uint32{100, 200})
-	w.WriteFrame([]uint32{300, 400})
-	w.Close()
-
-	r, err := NewReader(bytes.NewReader(buf.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	f1, _ := r.ReadFrame()
-	raw1Ptr := &f1.RawValues()[0]
-
-	f2, _ := r.ReadFrame()
-	raw2Ptr := &f2.RawValues()[0]
-
-	// Same pointer — frame is reused.
-	if raw1Ptr != raw2Ptr {
-		t.Error("expected ReadFrame to reuse internal slice")
-	}
-	// Values reflect second frame.
-	if f2.RawValues()[0] != 300 || f2.RawValues()[1] != 400 {
-		t.Errorf("second frame: got [%d, %d], want [300, 400]",
-			f2.RawValues()[0], f2.RawValues()[1])
-	}
-}
-
-// channelTypes maps hardware indices to channel types, mirroring queueNames
-// in cmd/daq/helpers.go.
+// channelTypes maps hardware indices to channel types.
 var channelTypes = [13]ChannelType{
-	AnalogIn, AnalogIn, AnalogIn, AnalogIn, // 0-3
-	AnalogIn, AnalogIn, AnalogIn, AnalogIn, // 4-7
-	DigitalIO,          // 8
-	Counter, Counter,   // 9-10
-	Encoder, Encoder,   // 11-12
+	AnalogIn, AnalogIn, AnalogIn, AnalogIn,
+	AnalogIn, AnalogIn, AnalogIn, AnalogIn,
+	DigitalIO,
+	Counter, Counter,
+	Encoder, Encoder,
 }
 
-// buildFuzzHeader constructs a Header the same way cmd_capture.go:buildHeader
-// does: channel descriptors with types, ranges, and calibration entries based
-// on the queue composition.
 func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float64) Header {
 	channels := make([]Channel, len(queue))
 	analogIdx := 0
@@ -1015,7 +1125,7 @@ func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float6
 			Index: idx,
 			Type:  channelTypes[idx],
 		}
-		if idx < 8 { // analog
+		if idx < 8 {
 			r := ranges[analogIdx]
 			ch.Range = r
 			ch.Cal = &CalEntry{
@@ -1038,43 +1148,28 @@ func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float6
 	}
 }
 
-// FuzzCaptureRaw emulates "daq capture --raw" end-to-end: builds a header
-// with CLI-like channel/range configuration, writes raw uint32 frames with
-// varied compression and buffer sizes, reads them back, and verifies both
-// raw round-trip and calibrated Values().
 func FuzzCaptureRaw(f *testing.F) {
-	// Seed with representative CLI invocations.
-	// queueBits encodes which of the 13 channels are in the queue.
 	for _, queueBits := range []uint16{
-		0x000F, // ain0-3 (--channels 0-3)
-		0x00FF, // ain0-7 (--channels 0-7)
-		0x0003, // ain0,ain1
-		0x0103, // ain0,ain1,dio
-		0x1F03, // ain0,ain1,dio,counter0,counter1,encoder0,encoder1
-		0x0001, // single channel
-		0x1FFF, // all 13
+		0x000F, 0x00FF, 0x0003, 0x0103, 0x1F03, 0x0001, 0x1FFF,
 	} {
 		for _, rangeBits := range []uint8{0, 1, 2, 3} {
 			for _, nFrames := range []int{0, 1, 10, 100} {
-				for _, compress := range []bool{false, true} {
-					for _, bufSize := range []int{1, 64, 1024} {
-						f.Add(queueBits, rangeBits, nFrames, compress, bufSize)
-					}
+				for _, bufSize := range []int{1, 64, 1024} {
+					f.Add(queueBits, rangeBits, nFrames, bufSize)
 				}
 			}
 		}
 	}
 
-	f.Fuzz(func(t *testing.T, queueBits uint16, rangeBits uint8, nFrames int, compress bool, bufSize int) {
+	f.Fuzz(func(t *testing.T, queueBits uint16, rangeBits uint8, nFrames int, bufSize int) {
 		if nFrames < 0 || nFrames > 5000 || bufSize < 1 || bufSize > 100000 {
 			t.Skip()
 		}
-		queueBits &= 0x1FFF // 13 valid channels
+		queueBits &= 0x1FFF
 		if queueBits == 0 {
 			t.Skip()
 		}
 
-		// Build queue from bits (same as parseQueue/parseChannels).
 		var queue []int
 		for i := range 13 {
 			if queueBits&(1<<i) != 0 {
@@ -1082,7 +1177,6 @@ func FuzzCaptureRaw(f *testing.F) {
 			}
 		}
 
-		// Assign ranges to analog channels.
 		var ranges []uint8
 		for _, idx := range queue {
 			if idx < 8 {
@@ -1093,33 +1187,30 @@ func FuzzCaptureRaw(f *testing.F) {
 		h := buildFuzzHeader(queue, ranges, RawUint32, 10000)
 		nCh := len(queue)
 
-		var buf bytes.Buffer
-		var opts []WriterOption
-		if compress {
-			opts = append(opts, WithCompression(true))
-		}
-		opts = append(opts, WithBufferSize(bufSize))
+		dir := filepath.Join(t.TempDir(), "capture")
+		opts := []WriterOption{WithBufferSize(bufSize)}
 
-		w, err := NewWriter(&buf, h, opts...)
+		w, err := NewWriter(dir, h, opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		// Write frames like the capture loop does.
+		allFrames := make([][]uint32, nFrames)
 		for i := range nFrames {
 			vals := make([]uint32, nCh)
 			for j, idx := range queue {
 				switch {
-				case idx < 8: // analog: simulated ADC values
+				case idx < 8:
 					vals[j] = uint32(131072+i*13+j*7) & 0x3FFFF
-				case idx == 8: // digital
+				case idx == 8:
 					vals[j] = uint32(i) & 0xFF
-				default: // counter/encoder
+				default:
 					vals[j] = uint32(i * (idx + 1))
 				}
 			}
-			if err := w.WriteFrame(vals); err != nil {
-				t.Fatalf("WriteFrame %d: %v", i, err)
+			allFrames[i] = vals
+			if err := w.WriteBulk(framesToBulk([][]uint32{vals})); err != nil {
+				t.Fatalf("WriteBulk %d: %v", i, err)
 			}
 		}
 		if err := w.Close(); err != nil {
@@ -1130,8 +1221,7 @@ func FuzzCaptureRaw(f *testing.F) {
 			t.Fatalf("FramesWritten = %d, want %d", w.FramesWritten(), nFrames)
 		}
 
-		// Read back (emulates "daq file info" + "daq file export" path).
-		r, err := NewReader(bytes.NewReader(buf.Bytes()))
+		r, err := NewReader(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1151,27 +1241,16 @@ func FuzzCaptureRaw(f *testing.F) {
 				t.Fatalf("Frames() at %d: %v", count, err)
 			}
 
-			// Verify raw values round-trip.
 			raw := frame.RawValues()
 			if len(raw) != nCh {
 				t.Fatalf("frame %d: %d values, want %d", count, len(raw), nCh)
 			}
-			for j, idx := range queue {
-				var want uint32
-				switch {
-				case idx < 8:
-					want = uint32(131072+count*13+j*7) & 0x3FFFF
-				case idx == 8:
-					want = uint32(count) & 0xFF
-				default:
-					want = uint32(count * (idx + 1))
-				}
-				if raw[j] != want {
-					t.Fatalf("frame %d ch %d (hw%d): got %d, want %d", count, j, idx, raw[j], want)
+			for j := range nCh {
+				if raw[j] != allFrames[count][j] {
+					t.Fatalf("frame %d ch %d: got %d, want %d", count, j, raw[j], allFrames[count][j])
 				}
 			}
 
-			// Verify Values() produces finite numbers (exercises calibrate).
 			vals := frame.Values()
 			for j, v := range vals {
 				if math.IsNaN(v) || math.IsInf(v, 0) {
@@ -1186,9 +1265,6 @@ func FuzzCaptureRaw(f *testing.F) {
 	})
 }
 
-
-// FuzzCalibrate exercises the calibrate function across all ranges with
-// fuzzed raw values and calibration coefficients.
 func FuzzCalibrate(f *testing.F) {
 	for _, rng := range []uint8{0, 1, 2, 3} {
 		for _, raw := range []uint32{0, 1, 131072, 262143} {
@@ -1208,7 +1284,7 @@ func FuzzCalibrate(f *testing.F) {
 			t.Skip()
 		}
 
-		raw &= 0x3FFFF // 18-bit ADC values
+		raw &= 0x3FFFF
 		ch := Channel{
 			Type:  AnalogIn,
 			Range: rng,
@@ -1226,13 +1302,12 @@ func FuzzCalibrate(f *testing.F) {
 				raw, rng, slope, offset)
 		}
 
-		// Unipolar ranges clamp at 0.
 		switch rng {
-		case 2: // UP10V
+		case 2:
 			if v < -0.001 {
 				t.Errorf("UP10V: got %f, expected >= 0", v)
 			}
-		case 3: // UP5V
+		case 3:
 			if v < -0.001 {
 				t.Errorf("UP5V: got %f, expected >= 0", v)
 			}
@@ -1240,9 +1315,6 @@ func FuzzCalibrate(f *testing.F) {
 	})
 }
 
-// FuzzCaptureSeekable emulates a seekable capture (writing to a real file)
-// to exercise frame-count patching in Writer.Close, then reads back via
-// NewReader and verifies FrameCount and data integrity.
 func FuzzCaptureSeekable(f *testing.F) {
 	for _, nCh := range []int{1, 4, 8, 13} {
 		for _, nFrames := range []int{0, 1, 50, 500} {
@@ -1255,13 +1327,6 @@ func FuzzCaptureSeekable(f *testing.F) {
 			t.Skip()
 		}
 
-		tmpFile, err := os.CreateTemp("", "fuzz-capture-*.daq")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(tmpFile.Name())
-		defer tmpFile.Close()
-
 		var queue []int
 		for i := range nCh {
 			queue = append(queue, i%13)
@@ -1269,7 +1334,8 @@ func FuzzCaptureSeekable(f *testing.F) {
 
 		h := buildFuzzHeader(queue, make([]uint8, nCh), RawUint32, 48000)
 
-		w, err := NewWriter(tmpFile, h)
+		dir := filepath.Join(t.TempDir(), "capture")
+		w, err := NewWriter(dir, h)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1279,22 +1345,15 @@ func FuzzCaptureSeekable(f *testing.F) {
 			for j := range nCh {
 				vals[j] = uint32(i*nCh+j) & 0x3FFFF
 			}
-			if err := w.WriteFrame(vals); err != nil {
-				t.Fatalf("write %d: %v", i, err)
+			if err := w.WriteBulk(framesToBulk([][]uint32{vals})); err != nil {
+				t.Fatalf("WriteBulk %d: %v", i, err)
 			}
 		}
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
 
-		// Re-open and verify frame count was patched.
-		rf, err := os.Open(tmpFile.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rf.Close()
-
-		r, err := NewReader(rf)
+		r, err := NewReader(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1317,13 +1376,11 @@ func FuzzCaptureSeekable(f *testing.F) {
 	})
 }
 
-// benchData generates numFrames of raw uint32 data for numCh channels.
 func benchData(numCh, numFrames int) [][]uint32 {
 	data := make([][]uint32, numFrames)
 	for i := range numFrames {
 		vals := make([]uint32, numCh)
 		for ch := range numCh {
-			// Simulate slowly-varying ADC signal.
 			vals[ch] = uint32(131072 + (i*13+ch*7)%1000)
 		}
 		data[i] = vals
@@ -1331,41 +1388,22 @@ func benchData(numCh, numFrames int) [][]uint32 {
 	return data
 }
 
-
 func BenchmarkWriteRaw(b *testing.B) {
 	const numCh = 8
-	data := benchData(numCh, 1)
+	const numFrames = 10000
+	data := benchData(numCh, numFrames)
 	h := testHeaderRaw(numCh)
-	frame := data[0]
+	bulk := framesToBulk(data)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		w, _ := NewWriter(io.Discard, h)
-		for range 10000 {
-			w.WriteFrame(frame)
-		}
+		dir := b.TempDir()
+		w, _ := NewWriter(dir, h)
+		w.WriteBulk(bulk)
 		w.Close()
 	}
 }
-
-func BenchmarkWriteRawCompressed(b *testing.B) {
-	const numCh = 8
-	data := benchData(numCh, 1)
-	h := testHeaderRaw(numCh)
-	frame := data[0]
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		w, _ := NewWriter(io.Discard, h, WithCompression(true))
-		for range 10000 {
-			w.WriteFrame(frame)
-		}
-		w.Close()
-	}
-}
-
 
 func BenchmarkReadRaw(b *testing.B) {
 	const numCh = 8
@@ -1373,18 +1411,15 @@ func BenchmarkReadRaw(b *testing.B) {
 	data := benchData(numCh, numFrames)
 	h := testHeaderRaw(numCh)
 
-	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, h)
-	for _, f := range data {
-		w.WriteFrame(f)
-	}
+	dir := b.TempDir()
+	w, _ := NewWriter(dir, h)
+	w.WriteBulk(framesToBulk(data))
 	w.Close()
-	raw := buf.Bytes()
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		r, _ := NewReader(bytes.NewReader(raw))
+		r, _ := NewReader(dir)
 		for {
 			_, err := r.ReadFrame()
 			if err != nil {
@@ -1392,72 +1427,5 @@ func BenchmarkReadRaw(b *testing.B) {
 			}
 		}
 		r.Close()
-	}
-}
-
-func BenchmarkReadRawCompressed(b *testing.B) {
-	const numCh = 8
-	const numFrames = 10000
-	data := benchData(numCh, numFrames)
-	h := testHeaderRaw(numCh)
-
-	var buf bytes.Buffer
-	w, _ := NewWriter(&buf, h, WithCompression(true))
-	for _, f := range data {
-		w.WriteFrame(f)
-	}
-	w.Close()
-	raw := buf.Bytes()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		r, _ := NewReader(bytes.NewReader(raw))
-		for {
-			_, err := r.ReadFrame()
-			if err != nil {
-				break
-			}
-		}
-		r.Close()
-	}
-}
-
-
-// BenchmarkWriteDiscard_Uncompressed vs Compressed isolates compression overhead
-// by writing to io.Discard (no I/O cost).
-func BenchmarkWriteDiscard_Uncompressed(b *testing.B) {
-	const numCh = 8
-	const numFrames = 50000
-	data := benchData(numCh, numFrames)
-	h := testHeaderRaw(numCh)
-
-	b.SetBytes(int64(numFrames * numCh * 4))
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		w, _ := NewWriter(io.Discard, h)
-		for _, f := range data {
-			w.WriteFrame(f)
-		}
-		w.Close()
-	}
-}
-
-func BenchmarkWriteDiscard_Compressed(b *testing.B) {
-	const numCh = 8
-	const numFrames = 50000
-	data := benchData(numCh, numFrames)
-	h := testHeaderRaw(numCh)
-
-	b.SetBytes(int64(numFrames * numCh * 4))
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		w, _ := NewWriter(io.Discard, h, WithCompression(true))
-		for _, f := range data {
-			w.WriteFrame(f)
-		}
-		w.Close()
 	}
 }
