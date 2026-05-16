@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/borud/mcc-usb-1808/internal/wire"
+	"github.com/borud/mcc-usb-1808/v3/internal/wire"
 )
 
 // AnalogInChannelConfig holds the range and mode for a single analog input channel.

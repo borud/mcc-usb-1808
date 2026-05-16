@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/borud/mcc-usb-1808"
+	"github.com/borud/mcc-usb-1808/v3"
 )
 
 // parseChannels parses a channel list like "0,2,4" or "0-3" or "0-3,5,7".

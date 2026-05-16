@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/borud/mcc-usb-1808/capture"
-	"github.com/borud/mcc-usb-1808/capture/export"
+	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v3/capture/export"
 )
 
 type fileCmd struct {

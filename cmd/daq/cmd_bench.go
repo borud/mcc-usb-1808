@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/borud/mcc-usb-1808"
-	"github.com/borud/mcc-usb-1808/capture"
+	"github.com/borud/mcc-usb-1808/v3"
+	"github.com/borud/mcc-usb-1808/v3/capture"
 )
 
 type benchCmd struct {

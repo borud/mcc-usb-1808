@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/borud/mcc-usb-1808/internal/transport"
-	"github.com/borud/mcc-usb-1808/internal/wire"
+	"github.com/borud/mcc-usb-1808/v3/internal/transport"
+	"github.com/borud/mcc-usb-1808/v3/internal/wire"
 )
 
 // AnalogInScanConfig holds configuration for an analog input scan.

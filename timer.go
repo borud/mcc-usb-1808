@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/borud/mcc-usb-1808/internal/wire"
+	"github.com/borud/mcc-usb-1808/v3/internal/wire"
 )
 
 func validateTimer(timer int) error {

@@ -3,7 +3,7 @@ package usb1808
 import (
 	"fmt"
 
-	"github.com/borud/mcc-usb-1808/internal/firmware"
+	"github.com/borud/mcc-usb-1808/v3/internal/firmware"
 )
 
 // Init performs the full device initialization sequence. It checks whether the

@@ -3,7 +3,7 @@ package usb1808
 import (
 	"time"
 
-	"github.com/borud/mcc-usb-1808/internal/wire"
+	"github.com/borud/mcc-usb-1808/v3/internal/wire"
 )
 
 // buildAInCalibrationTable reads ADC calibration coefficients from EEPROM.

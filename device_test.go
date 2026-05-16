@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/borud/mcc-usb-1808/internal/wire"
-	"github.com/borud/mcc-usb-1808/internal/transport"
+	"github.com/borud/mcc-usb-1808/v3/internal/wire"
+	"github.com/borud/mcc-usb-1808/v3/internal/transport"
 )
 
 func TestBlinkLED(t *testing.T) {

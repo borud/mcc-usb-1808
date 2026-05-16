@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/borud/mcc-usb-1808"
+	"github.com/borud/mcc-usb-1808/v3"
 )
 
 type analogScanCmd struct {

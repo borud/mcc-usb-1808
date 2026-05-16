@@ -7,7 +7,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/borud/mcc-usb-1808/capture"
+	"github.com/borud/mcc-usb-1808/v3/capture"
 	pq "github.com/parquet-go/parquet-go"
 )
 

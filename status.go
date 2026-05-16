@@ -1,6 +1,6 @@
 package usb1808
 
-import "github.com/borud/mcc-usb-1808/internal/wire"
+import "github.com/borud/mcc-usb-1808/v3/internal/wire"
 
 // Status represents the device status word.
 type Status uint16

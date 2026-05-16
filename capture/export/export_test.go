@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/borud/mcc-usb-1808/capture"
+	"github.com/borud/mcc-usb-1808/v3/capture"
 	parquet "github.com/parquet-go/parquet-go"
 	"github.com/xuri/excelize/v2"
 	_ "modernc.org/sqlite"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/borud/mcc-usb-1808/internal/wire"
+	"github.com/borud/mcc-usb-1808/v3/internal/wire"
 )
 
 // AnalogOut writes a voltage to the specified analog output channel (0 or 1).

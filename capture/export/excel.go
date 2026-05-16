@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/borud/mcc-usb-1808/capture"
+	"github.com/borud/mcc-usb-1808/v3/capture"
 	"github.com/xuri/excelize/v2"
 )
 

@@ -6,7 +6,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/borud/mcc-usb-1808/capture"
+	"github.com/borud/mcc-usb-1808/v3/capture"
 )
 
 // CSV writes all remaining frames from r as CSV to w.

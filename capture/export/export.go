@@ -9,7 +9,7 @@ package export
 import (
 	"fmt"
 
-	"github.com/borud/mcc-usb-1808/capture"
+	"github.com/borud/mcc-usb-1808/v3/capture"
 )
 
 // columnNames returns a display name for each channel. Named channels use

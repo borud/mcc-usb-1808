@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
-	"github.com/borud/mcc-usb-1808"
+	"github.com/borud/mcc-usb-1808/v3"
 )
 
 var (

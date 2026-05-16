@@ -1,4 +1,4 @@
-module github.com/borud/mcc-usb-1808
+module github.com/borud/mcc-usb-1808/v3
 
 go 1.24.9
 
