@@ -1,9 +1,6 @@
 package capture
 
-import (
-	"github.com/borud/mcc-usb-1808/v4/codec"
-	"github.com/borud/mcc-usb-1808/v4/device"
-)
+import "github.com/borud/mcc-usb-1808/v4/device"
 
 // Frame holds one scan's worth of sampled data.
 //
@@ -53,5 +50,5 @@ func calibrate(raw uint32, ch Channel) float64 {
 		return float64(raw)
 	}
 	cal := device.Calibration{Slope: ch.Cal.Slope, Offset: ch.Cal.Offset}
-	return codec.RawToVolts(raw, device.Range(ch.Range), cal)
+	return cal.ToVolts(raw, device.Range(ch.Range))
 }

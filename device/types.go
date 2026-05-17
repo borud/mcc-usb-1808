@@ -1,6 +1,8 @@
 // Package device provides the USB-1808/1808X device driver.
 package device
 
+import "math"
+
 // USB vendor and product IDs.
 const (
 	VendorID = 0x09DB // Measurement Computing Corporation
@@ -112,6 +114,32 @@ type ChannelConfig struct {
 type Calibration struct {
 	Slope  float32
 	Offset float32
+}
+
+// ToVolts converts a raw 18-bit ADC value to voltage using these calibration
+// coefficients and the given voltage range.
+func (c Calibration) ToVolts(raw uint32, r Range) float64 {
+	raw18 := raw & 0x3FFFF
+	calibrated := float64(raw18)*float64(c.Slope) + float64(c.Offset)
+
+	// Clamp for unipolar ranges.
+	if r >= UP10V {
+		calibrated = max(0, min(262143, calibrated))
+	}
+	calibrated = math.Round(calibrated)
+
+	switch r {
+	case BP10V:
+		return (calibrated - 131072.0) * 10.0 / 131072.0
+	case BP5V:
+		return (calibrated - 131072.0) * 5.0 / 131072.0
+	case UP10V:
+		return calibrated * 10.0 / 262143.0
+	case UP5V:
+		return calibrated * 5.0 / 262143.0
+	default:
+		return float64(raw)
+	}
 }
 
 // CalibrationTable holds the full set of analog input calibration coefficients.

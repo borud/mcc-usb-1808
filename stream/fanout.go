@@ -1,5 +1,3 @@
-// Package stream provides fan-out broadcasting of raw scan chunks
-// to multiple concurrent consumers.
 package stream
 
 import "sync"
