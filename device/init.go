@@ -1,17 +1,14 @@
-package usb1808
+package device
 
 import (
 	"fmt"
 
-	"github.com/borud/mcc-usb-1808/v3/internal/firmware"
+	"github.com/borud/mcc-usb-1808/v4/firmware"
 )
 
-// Init performs the full device initialization sequence. It checks whether the
-// FPGA image has been loaded, and it it hasn't, takes care of loading it. This
-// means that the first time we run Init after the device has been booted this
-// will take a few seconds.  It then builds the calibration tables from EPROM.
+// Init performs the full device initialization sequence: loads the FPGA image
+// if needed and builds calibration tables from EEPROM.
 func (d *Device) Init() error {
-	// Check FPGA status.
 	status, err := d.Status()
 	if err != nil {
 		return err
@@ -23,7 +20,6 @@ func (d *Device) Init() error {
 		}
 	}
 
-	// Build calibration tables.
 	if err := d.buildAInCalibrationTable(); err != nil {
 		return fmt.Errorf("build AIn cal table: %w", err)
 	}
@@ -39,7 +35,6 @@ func (d *Device) Init() error {
 func (d *Device) fpgaConfig() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
 	return d.transport.ControlOut(cmdFPGAConfig, 0, 0, []byte{fpgaUnlockCode})
 }
 
@@ -50,20 +45,15 @@ func (d *Device) fpgaData(data []byte) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
 	return d.transport.ControlOut(cmdFPGAData, 0, 0, data)
 }
 
 // fpgaLoad loads an FPGA image onto the device.
-// The image is sent in 64-byte chunks. The device must be put into
-// configuration mode first, and FPGA_CONFIGURED status verified after.
 func (d *Device) fpgaLoad(image []byte) error {
-	// Enter configuration mode.
 	if err := d.fpgaConfig(); err != nil {
 		return fmt.Errorf("FPGA config mode: %w", err)
 	}
 
-	// Verify configuration mode.
 	status, err := d.Status()
 	if err != nil {
 		return err
@@ -74,7 +64,6 @@ func (d *Device) fpgaLoad(image []byte) error {
 
 	d.log.Info("loading FPGA image", "bytes", len(image))
 
-	// Stream image in 64-byte chunks, logging progress every 256 KiB.
 	const logInterval = 256 * 1024
 	nextLog := logInterval
 	for offset := 0; offset < len(image); offset += 64 {
@@ -91,7 +80,6 @@ func (d *Device) fpgaLoad(image []byte) error {
 		}
 	}
 
-	// Verify FPGA is now configured.
 	status, err = d.Status()
 	if err != nil {
 		return err

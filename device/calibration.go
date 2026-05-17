@@ -1,22 +1,20 @@
-package usb1808
+package device
 
 import (
 	"time"
 
-	"github.com/borud/mcc-usb-1808/v3/internal/wire"
+	"github.com/borud/mcc-usb-1808/v4/wire"
 )
 
 // buildAInCalibrationTable reads ADC calibration coefficients from EEPROM.
-// Populates d.calAIn[8][4] (8 channels x 4 ranges).
 func (d *Device) buildAInCalibrationTable() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	for ch := 0; ch < NumAInChannels; ch++ {
-		for gain := 0; gain < NumAInRanges; gain++ {
+	for ch := range NumAInChannels {
+		for gain := range NumAInRanges {
 			addr := uint16(memADCCalBase) + uint16((ch*4+gain)*8)
 
-			// Read slope.
 			if err := d.memSetAddress(addr); err != nil {
 				return err
 			}
@@ -25,7 +23,6 @@ func (d *Device) buildAInCalibrationTable() error {
 				return err
 			}
 
-			// Read offset.
 			if err := d.memSetAddress(addr + 4); err != nil {
 				return err
 			}
@@ -44,12 +41,11 @@ func (d *Device) buildAInCalibrationTable() error {
 }
 
 // buildAOutCalibrationTable reads DAC calibration coefficients from EEPROM.
-// Populates d.calAOut[2] (2 channels).
 func (d *Device) buildAOutCalibrationTable() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	for ch := 0; ch < NumAOutChannels; ch++ {
+	for ch := range NumAOutChannels {
 		addr := uint16(memDACCalBase) + uint16(ch*8)
 
 		if err := d.memSetAddress(addr); err != nil {
@@ -89,7 +85,6 @@ func (d *Device) CalibrationDate() (time.Time, error) {
 		return time.Time{}, err
 	}
 
-	// year is stored as offset from 2000.
 	year := int(data[0]) + 2000
 	month := time.Month(data[1])
 	day := int(data[2])
@@ -100,8 +95,8 @@ func (d *Device) CalibrationDate() (time.Time, error) {
 	return time.Date(year, month, day, hour, minute, second, 0, time.UTC), nil
 }
 
-// AnalogInCalTable returns the analog input calibration table.
-func (d *Device) AnalogInCalTable() [NumAInChannels][NumAInRanges]Calibration {
+// CalibrationTable returns the analog input calibration table.
+func (d *Device) CalibrationTable() CalibrationTable {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calAIn

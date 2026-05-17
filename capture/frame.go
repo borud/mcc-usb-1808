@@ -1,6 +1,9 @@
 package capture
 
-import "math"
+import (
+	"github.com/borud/mcc-usb-1808/v4/codec"
+	"github.com/borud/mcc-usb-1808/v4/device"
+)
 
 // Frame holds one scan's worth of sampled data.
 //
@@ -49,26 +52,6 @@ func calibrate(raw uint32, ch Channel) float64 {
 	if ch.Type != AnalogIn || ch.Cal == nil {
 		return float64(raw)
 	}
-
-	raw18 := raw & 0x3FFFF
-	cal := float64(raw18)*float64(ch.Cal.Slope) + float64(ch.Cal.Offset)
-
-	// Clamp for unipolar ranges.
-	if ch.Range >= 2 {
-		cal = max(0, min(262143, cal))
-	}
-	cal = math.Round(cal)
-
-	switch ch.Range {
-	case 0: // BP10V ±10V
-		return (cal - 131072.0) * 10.0 / 131072.0
-	case 1: // BP5V ±5V
-		return (cal - 131072.0) * 5.0 / 131072.0
-	case 2: // UP10V 0-10V
-		return cal * 10.0 / 262143.0
-	case 3: // UP5V 0-5V
-		return cal * 5.0 / 262143.0
-	default:
-		return float64(raw)
-	}
+	cal := device.Calibration{Slope: ch.Cal.Slope, Offset: ch.Cal.Offset}
+	return codec.RawToVolts(raw, device.Range(ch.Range), cal)
 }

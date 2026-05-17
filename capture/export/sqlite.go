@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture"
 	_ "modernc.org/sqlite" // needed for SQLite support
 )
 

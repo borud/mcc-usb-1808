@@ -1,5 +1,5 @@
 // Package export provides functions to export capture data to common file
-// formats: CSV, Excel (.xlsx), SQLite, Parquet, and WAV.
+// formats: CSV, SQLite, Parquet, and WAV.
 //
 // Each export function reads all remaining frames from a [capture.Reader]
 // and writes them to the target format. The reader is consumed by the call;
@@ -9,7 +9,7 @@ package export
 import (
 	"fmt"
 
-	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture"
 )
 
 // columnNames returns a display name for each channel. Named channels use

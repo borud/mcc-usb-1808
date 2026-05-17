@@ -1,108 +1,101 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"sync"
 	"time"
 
-	"github.com/borud/mcc-usb-1808/v3"
-	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 type benchCmd struct {
-	Channels string  `help:"Analog input channels." default:"0-7"`
-	Rate     float64 `help:"Sample rate in Hz per channel." default:"35000"`
+	Channels string  `help:"Channel spec (e.g. ain0-ain7, all)." default:"analog"`
+	Rate     string  `help:"Sample rate in Hz per channel (supports k/M suffix)." default:"35k"`
 	Duration float64 `help:"Test duration in seconds." default:"5"`
 }
 
 func (b *benchCmd) Run(app *cli) error {
+	rate, err := parseHumanInt(b.Rate)
+	if err != nil {
+		return fmt.Errorf("rate: %w", err)
+	}
+
+	channels, err := parseChannelSpec(b.Channels, device.BP10V, device.Differential)
+	if err != nil {
+		return err
+	}
+
 	dev, err := openAndInit(app)
 	if err != nil {
 		return err
 	}
 	defer dev.Close()
 
-	queue, err := parseChannels(b.Channels)
+	cfg := device.ScanConfig{
+		Channels: channels,
+		Rate:     rate,
+		Count:    0,
+	}
+
+	handle, err := dev.CreateScan(cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("create scan: %w", err)
 	}
 
-	rng, err := parseRanges("bp10v", max(len(queue), 1))
-	if err != nil {
-		return err
-	}
-
-	var analogChannels []int
-	for _, ch := range queue {
-		if ch < usb1808.NumAInChannels {
-			analogChannels = append(analogChannels, ch)
-		}
-	}
-
-	mode, _ := parseMode("differential")
-	if len(analogChannels) > 0 {
-		if err := configureAnalogInputs(dev, analogChannels, rng, mode); err != nil {
-			return err
-		}
-	}
-
-	_ = dev.StopAnalogInScan()
-
-	// Simulate capture's buildHeader (device reads between stop and scan start).
+	// Simulate capture's buildHeader (device reads between config and scan start).
 	_, _ = dev.SerialNumber()
 	_, _, _ = dev.FPGAVersion()
 	_, _ = dev.CalibrationDate()
-	_ = dev.AnalogInCalTable()
-
-	nCh := len(queue)
-	cfg := usb1808.AnalogInScanConfig{
-		Channels: queue,
-		Rate:     b.Rate,
-		Count:    0,
-	}
+	_ = dev.CalibrationTable()
 
 	xferMode := "sync-multi-reader"
 	if dev.AsyncBulkSupported() {
 		xferMode = "async-ring"
 	}
-	fmt.Fprintf(os.Stderr, "bench: %d ch, %.0f Hz/ch, %.0fs [%s]\n",
-		nCh, b.Rate, b.Duration, xferMode)
+	fmt.Fprintf(os.Stderr, "bench: %d ch, %d Hz/ch, %.0fs [%s]\n",
+		len(channels), rate, b.Duration, xferMode)
 
-	// Simulate capture command: signal handler, directory, writer.
+	// Signal handling.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	stopCh := make(chan struct{})
 	go func() {
 		<-sigCh
-		cancel()
+		close(stopCh)
+		handle.Stop()
 		signal.Reset(os.Interrupt)
 	}()
 
-	// Timer-based cancel for bench duration.
+	// Timer-based stop.
 	go func() {
-		time.Sleep(time.Duration(b.Duration * float64(time.Second)))
-		cancel()
+		timer := time.NewTimer(time.Duration(b.Duration * float64(time.Second)))
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			handle.Stop()
+		case <-stopCh:
+		}
 	}()
 
+	// Temp directory for capture writer (measures real write overhead).
 	dir, err := os.MkdirTemp("", "bench-capture-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
 
+	nCh := len(channels)
 	h := capture.Header{
 		Channels:   make([]capture.Channel, nCh),
-		SampleRate: b.Rate,
+		SampleRate: float64(rate),
 		Format:     capture.RawUint32,
 	}
-	for i := range nCh {
-		h.Channels[i] = capture.Channel{Index: queue[i], Type: capture.AnalogIn}
+	for i, ch := range channels {
+		h.Channels[i] = capture.Channel{Index: ch.Index, Type: capture.AnalogIn}
 	}
 	cw, err := capture.NewWriter(dir, h, capture.WithBufferSize(8192))
 	if err != nil {
@@ -124,34 +117,27 @@ func (b *benchCmd) Run(app *cli) error {
 		}
 	}()
 
+	if err := handle.Start(); err != nil {
+		return fmt.Errorf("start scan: %w", err)
+	}
+
 	var reads int
 	var totalBytes int64
 	start := time.Now()
 	var maxGap time.Duration
 	lastRead := start
 
-	for data, err := range dev.ScanAnalogInBulk(ctx, cfg) {
-		if err != nil {
-			if ctx.Err() != nil {
-				break
-			}
-			elapsed := time.Since(start)
-			fmt.Fprintf(os.Stderr, "FAILED after %d transfers, %d bytes, %.2fs: %v\n",
-				reads, totalBytes, elapsed.Seconds(), err)
-			fmt.Fprintf(os.Stderr, "  max gap between transfers: %v\n", maxGap)
-			close(writeCh)
-			wg.Wait()
-			return err
-		}
+	for data := range handle.Chunks() {
 		var buf []byte
 		select {
 		case buf = <-writePool:
 		default:
-			buf = make([]byte, cap(data))
+			buf = make([]byte, len(data))
 		}
 		buf = buf[:len(data)]
 		copy(buf, data)
 		writeCh <- buf
+
 		now := time.Now()
 		gap := now.Sub(lastRead)
 		if gap > maxGap {
@@ -160,6 +146,16 @@ func (b *benchCmd) Run(app *cli) error {
 		lastRead = now
 		reads++
 		totalBytes += int64(len(data))
+	}
+	close(writeCh)
+	wg.Wait()
+
+	if err := handle.Err(); err != nil {
+		elapsed := time.Since(start)
+		fmt.Fprintf(os.Stderr, "FAILED after %d transfers, %d bytes, %.2fs: %v\n",
+			reads, totalBytes, elapsed.Seconds(), err)
+		fmt.Fprintf(os.Stderr, "  max gap between transfers: %v\n", maxGap)
+		return err
 	}
 
 	elapsed := time.Since(start)

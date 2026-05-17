@@ -66,9 +66,13 @@ FUZZ_TIME ?= 1h
 
 fuzz:
 	@echo "*** $@ ($(FUZZ_TIME) per target)"
-	@for target in FuzzScanBatchSize FuzzScanReadTimeout FuzzScanParamsEndToEnd; do \
+	@for target in FuzzScanBatchSize FuzzRingStageSize; do \
 		echo "--- $$target"; \
-		CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" go test -fuzz $$target -fuzztime $(FUZZ_TIME) . || exit 1; \
+		CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" go test -fuzz $$target -fuzztime $(FUZZ_TIME) ./device || exit 1; \
+	done
+	@for target in FuzzCalibrate; do \
+		echo "--- $$target"; \
+		go test -fuzz $$target -fuzztime $(FUZZ_TIME) ./codec || exit 1; \
 	done
 	@for target in FuzzCaptureRaw FuzzCalibrate FuzzCaptureSeekable; do \
 		echo "--- $$target"; \

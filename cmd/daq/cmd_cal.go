@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/borud/mcc-usb-1808/v3"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 type calCmd struct {
@@ -60,8 +60,8 @@ func (c *calTableCmd) Run(app *cli) error {
 	return c.showAIn(dev)
 }
 
-func (c *calTableCmd) showAIn(dev *usb1808.Device) error {
-	table := dev.AnalogInCalTable()
+func (c *calTableCmd) showAIn(dev *device.Device) error {
+	table := dev.CalibrationTable()
 	rangeLabels := []string{"±10V", "±5V", "0-10V", "0-5V"}
 
 	if c.Format == "json" {
@@ -108,7 +108,7 @@ func (c *calTableCmd) showAIn(dev *usb1808.Device) error {
 	return nil
 }
 
-func (c *calTableCmd) showAOut(dev *usb1808.Device) error {
+func (c *calTableCmd) showAOut(dev *device.Device) error {
 	table := dev.AnalogOutCalTable()
 
 	if c.Format == "json" {

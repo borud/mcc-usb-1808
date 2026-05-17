@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/borud/mcc-usb-1808/v3/capture"
-	"github.com/borud/mcc-usb-1808/v3/capture/export"
+	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture/export"
 )
 
 type fileCmd struct {
@@ -224,7 +224,7 @@ func (c *fileExportCmd) Run(_ *cli) error {
 			exportErr = closeErr
 		}
 	case "excel":
-		exportErr = export.Excel(outPath, r)
+		exportErr = fmt.Errorf("excel export has been removed; use csv or parquet instead")
 	case "sqlite":
 		exportErr = export.SQLite(outPath, r)
 	case "wav":

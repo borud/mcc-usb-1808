@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
-	"github.com/borud/mcc-usb-1808/v3"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 var (
@@ -16,22 +16,15 @@ var (
 )
 
 type cli struct {
-	LogLevel  string `help:"Log level (${enum})." default:"info" enum:"debug,info,warn,error"`
+	LogLevel string `help:"Log level (${enum})." default:"info" enum:"debug,info,warn,error"`
 	LogFormat string `help:"Log format (${enum})." default:"text" enum:"text,json"`
-	Model     string `help:"Force device model (1808,1808x)." default:"" enum:",1808,1808x"`
+	Model    string `help:"Force device model (1808,1808x)." default:"" enum:",1808,1808x"`
 
 	Info    infoCmd    `cmd:"" help:"Show device information."`
 	Status  statusCmd  `cmd:"" help:"Show device status."`
 	Reset   resetCmd   `cmd:"" help:"Reset the device."`
 	Blink   blinkCmd   `cmd:"" help:"Blink the device LED."`
 	Version versionCmd `cmd:"" help:"Show version information."`
-
-	Analog  analogCmd  `cmd:"" help:"Analog I/O commands."`
-	Dio     dioCmd     `cmd:"" help:"Digital I/O commands."`
-	Counter counterCmd `cmd:"" help:"Counter and encoder commands."`
-	Timer   timerCmd   `cmd:"" help:"Timer/PWM commands."`
-	Trigger triggerCmd `cmd:"" help:"Trigger configuration."`
-	Pattern patternCmd `cmd:"" help:"Pattern detection configuration."`
 	Cal     calCmd     `cmd:"" help:"Calibration data."`
 	Capture captureCmd `cmd:"" help:"Capture scan data to directory."`
 	File    fileCmd    `cmd:"" help:"Capture file operations."`
@@ -39,7 +32,6 @@ type cli struct {
 }
 
 func main() {
-	// Show help when invoked without arguments.
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "--help")
 	}
@@ -82,16 +74,16 @@ func setupLogger(level, format string) *slog.Logger {
 	return slog.New(handler)
 }
 
-func openDevice(app *cli) (*usb1808.Device, error) {
-	var dev *usb1808.Device
+func openDevice(app *cli) (*device.Device, error) {
+	var dev *device.Device
 	var err error
 	switch app.Model {
 	case "1808":
-		dev, err = usb1808.OpenModel(usb1808.USB1808)
+		dev, err = device.OpenModel(device.USB1808)
 	case "1808x":
-		dev, err = usb1808.OpenModel(usb1808.USB1808X)
+		dev, err = device.OpenModel(device.USB1808X)
 	default:
-		dev, err = usb1808.Open()
+		dev, err = device.Open()
 	}
 	if err != nil {
 		return nil, err
@@ -100,7 +92,7 @@ func openDevice(app *cli) (*usb1808.Device, error) {
 	return dev, nil
 }
 
-func openAndInit(app *cli) (*usb1808.Device, error) {
+func openAndInit(app *cli) (*device.Device, error) {
 	dev, err := openDevice(app)
 	if err != nil {
 		return nil, err

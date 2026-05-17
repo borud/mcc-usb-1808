@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,16 +8,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/borud/mcc-usb-1808/v3"
-	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 type captureCmd struct {
-	Channels    string `help:"Analog input channels (e.g. 0-3 or 0,2,4)." default:"0-3"`
-	Queue       string `help:"Mixed scan queue (e.g. ain0,ain1,dio,counter0)." default:""`
-	Range       string `help:"Voltage range (bp10v,bp5v,up10v,up5v)." default:"bp10v"`
-	Mode        string `help:"Input mode (${enum})." default:"differential" enum:"differential,single-ended,grounded"`
-	Rate        float64 `help:"Sample rate in Hz per channel." default:"10000"`
+	Channels    string  `help:"Channel spec (e.g. ain0-ain3:bp10v:diff,dio,counter0)." default:"analog"`
+	Range       string  `help:"Default voltage range (bp10v,bp5v,up10v,up5v)." default:"bp10v"`
+	Mode        string  `help:"Default input mode (${enum})." default:"diff" enum:"diff,differential,se,single-ended,grounded"`
+	Rate        string  `help:"Sample rate in Hz per channel (supports k/M suffix)." default:"10000"`
 	Count       int     `help:"Number of scans (0=continuous)." default:"0"`
 	Trigger     string  `help:"Trigger mode (${enum})." default:"none" enum:"none,rising,falling,high,low"`
 	Retrigger   uint32  `help:"Scans per trigger event (0=disabled)." default:"0"`
@@ -49,52 +47,51 @@ func (c *captureCmd) Run(app *cli) error {
 		c.Out = fmt.Sprintf("capture_%s", time.Now().Format("20060102_150405"))
 	}
 
+	rate, err := parseHumanInt(c.Rate)
+	if err != nil {
+		return fmt.Errorf("rate: %w", err)
+	}
+
+	defaultRange := rangeNames[c.Range]
+	defaultMode := modeNames[c.Mode]
+
+	channels, err := parseChannelSpec(c.Channels, defaultRange, defaultMode)
+	if err != nil {
+		return fmt.Errorf("channels: %w", err)
+	}
+
 	dev, err := openAndInit(app)
 	if err != nil {
 		return err
 	}
 	defer dev.Close()
 
-	// Build scan queue.
-	var queue []int
-	if c.Queue != "" {
-		queue, err = parseQueue(c.Queue)
-		if err != nil {
-			return fmt.Errorf("queue: %w", err)
-		}
-	} else {
-		queue, err = parseChannels(c.Channels)
-		if err != nil {
-			return fmt.Errorf("channels: %w", err)
+	// Build scan options.
+	var scanOpts uint8
+	if c.Trigger != "none" {
+		scanOpts |= device.ScanOptExternalTrigger
+		if err := dev.SetTriggerConfig(triggerConfigByte(c.Trigger)); err != nil {
+			return fmt.Errorf("trigger: %w", err)
 		}
 	}
-
-	// Extract analog channels for range configuration.
-	var analogChannels []int
-	for _, ch := range queue {
-		if ch < usb1808.NumAInChannels {
-			analogChannels = append(analogChannels, ch)
-		}
+	if c.Retrigger > 0 {
+		scanOpts |= device.ScanOptRetriggerMode
 	}
 
-	mode, err := parseMode(c.Mode)
+	cfg := device.ScanConfig{
+		Channels: channels,
+		Rate:     rate,
+		Count:    uint32(c.Count),
+		Options:  scanOpts,
+	}
+
+	handle, err := dev.CreateScan(cfg, device.WithPipelineDepth(c.Pipeline))
 	if err != nil {
-		return err
-	}
-
-	ranges, err := parseRanges(c.Range, max(len(analogChannels), 1))
-	if err != nil {
-		return fmt.Errorf("range: %w", err)
-	}
-
-	if len(analogChannels) > 0 {
-		if err := configureAnalogInputs(dev, analogChannels, ranges, mode); err != nil {
-			return fmt.Errorf("configure: %w", err)
-		}
+		return fmt.Errorf("create scan: %w", err)
 	}
 
 	// Build capture header.
-	header, err := c.buildHeader(dev, queue, ranges)
+	header, err := c.buildHeader(dev, channels)
 	if err != nil {
 		return fmt.Errorf("build header: %w", err)
 	}
@@ -114,54 +111,27 @@ func (c *captureCmd) Run(app *cli) error {
 	}
 	defer cw.Close()
 
-	// Configure trigger.
-	var scanOpts uint8
-	if c.Trigger != "none" {
-		scanOpts |= usb1808.ScanOptExternalTrigger
-		if err := dev.SetTriggerConfig(triggerConfigByte(c.Trigger)); err != nil {
-			return fmt.Errorf("trigger: %w", err)
-		}
-	}
-	if c.Retrigger > 0 {
-		scanOpts |= usb1808.ScanOptRetriggerMode
-	}
-
-	_ = dev.StopAnalogInScan()
-
-	// Handle interrupt: first SIGINT stops the scan gracefully,
-	// subsequent signals are ignored until data is flushed.
+	// Handle interrupt.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	go func() {
 		<-sigCh
 		fmt.Fprintf(os.Stderr, "\nstopping capture, flushing data...\n")
-		cancel()
-		// Ignore further signals so we don't get killed during flush.
+		handle.Stop()
 		signal.Reset(os.Interrupt)
 	}()
 
-	cfg := usb1808.AnalogInScanConfig{
-		Channels:      queue,
-		Rate:          c.Rate,
-		Count:         uint32(c.Count),
-		RetrigCount:   c.Retrigger,
-		Options:       scanOpts,
-		PipelineDepth: c.Pipeline,
+	if err := handle.Start(); err != nil {
+		return fmt.Errorf("start scan: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "capturing to %s/ (%d channels, %.0f Hz, press Ctrl-C to stop)\n", c.Out, len(queue), c.Rate)
+	fmt.Fprintf(os.Stderr, "capturing to %s/ (%d channels, %d Hz, press Ctrl-C to stop)\n",
+		c.Out, len(channels), rate)
 
-	// Decouple disk I/O from the USB pipeline: the scan loop only
-	// copies data into a channel (memory-only), while a background
-	// goroutine handles all disk writes.
+	// Decouple disk I/O from USB: scan loop copies into channel, writer goroutine flushes.
 	const writeDepth = 64
 	writeCh := make(chan []byte, writeDepth)
-
-	// Write buffer pool: eliminates allocations in steady state.
 	writePool := make(chan []byte, writeDepth+1)
 
 	var writeErr error
@@ -179,21 +149,12 @@ func (c *captureCmd) Run(app *cli) error {
 		}
 	}()
 
-	for data, err := range dev.ScanAnalogInBulk(ctx, cfg) {
-		if err != nil {
-			if ctx.Err() != nil {
-				break
-			}
-			close(writeCh)
-			wg.Wait()
-			return fmt.Errorf("scan: %w", err)
-		}
-
+	for data := range handle.Chunks() {
 		var buf []byte
 		select {
 		case buf = <-writePool:
 		default:
-			buf = make([]byte, cap(data))
+			buf = make([]byte, len(data))
 		}
 		buf = buf[:len(data)]
 		copy(buf, data)
@@ -201,6 +162,10 @@ func (c *captureCmd) Run(app *cli) error {
 	}
 	close(writeCh)
 	wg.Wait()
+
+	if err := handle.Err(); err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
 	if writeErr != nil {
 		return fmt.Errorf("write: %w", writeErr)
 	}
@@ -212,7 +177,7 @@ func (c *captureCmd) Run(app *cli) error {
 	return nil
 }
 
-func (c *captureCmd) buildHeader(dev *usb1808.Device, queue []int, ranges []usb1808.Range) (capture.Header, error) {
+func (c *captureCmd) buildHeader(dev *device.Device, channels []device.ChannelConfig) (capture.Header, error) {
 	serial, err := dev.SerialNumber()
 	if err != nil {
 		return capture.Header{}, fmt.Errorf("serial: %w", err)
@@ -224,35 +189,33 @@ func (c *captureCmd) buildHeader(dev *usb1808.Device, queue []int, ranges []usb1
 	}
 
 	calDate, _ := dev.CalibrationDate()
-	calTable := dev.AnalogInCalTable()
+	calTable := dev.CalibrationTable()
 
-	// Build channel descriptors.
-	channels := make([]capture.Channel, len(queue))
-	analogIdx := 0
-	for i, ch := range queue {
+	rate, _ := parseHumanInt(c.Rate)
+
+	chDescs := make([]capture.Channel, len(channels))
+	for i, ch := range channels {
 		cc := capture.Channel{
-			Index: ch,
-			Name:  scanChanNames[ch],
+			Index: ch.Index,
+			Name:  scanChanNames[ch.Index],
 		}
-		switch {
-		case ch < usb1808.NumAInChannels:
+		switch ch.Type {
+		case device.ChannelTypeAnalog:
 			cc.Type = capture.AnalogIn
-			r := ranges[analogIdx]
-			cc.Range = uint8(r)
-			cal := calTable[ch][r] // #nosec G602 -- ch and r validated by scan queue config
+			cc.Range = uint8(ch.Range)
+			cal := calTable[ch.Index][ch.Range]
 			cc.Cal = &capture.CalEntry{
 				Slope:  cal.Slope,
 				Offset: cal.Offset,
 			}
-			analogIdx++
-		case ch == 8:
+		case device.ChannelTypeDIO:
 			cc.Type = capture.DigitalIO
-		case ch <= 10:
+		case device.ChannelTypeCounter:
 			cc.Type = capture.Counter
-		default:
+		case device.ChannelTypeEncoder:
 			cc.Type = capture.Encoder
 		}
-		channels[i] = cc
+		chDescs[i] = cc
 	}
 
 	h := capture.Header{
@@ -260,8 +223,8 @@ func (c *captureCmd) buildHeader(dev *usb1808.Device, queue []int, ranges []usb1
 		DeviceSerial:    serial,
 		FPGAVersion:     fmt.Sprintf("%d.%d", major, minor),
 		CalibrationDate: calDate,
-		Channels:        channels,
-		SampleRate:      c.Rate,
+		Channels:        chDescs,
+		SampleRate:      float64(rate),
 		Format:          capture.RawUint32,
 		Timestamp:       time.Now().UnixMilli(),
 	}

@@ -13,9 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture"
 	parquet "github.com/parquet-go/parquet-go"
-	"github.com/xuri/excelize/v2"
 	_ "modernc.org/sqlite"
 )
 
@@ -226,62 +225,6 @@ func TestCSV_EmptyCapture(t *testing.T) {
 	}
 }
 
-func TestExcel_Basic(t *testing.T) {
-	r := testReader(t)
-	defer r.Close()
-
-	path := filepath.Join(t.TempDir(), "test.xlsx")
-	if err := Excel(path, r); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := excelize.OpenFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-
-	sheets := f.GetSheetList()
-	if len(sheets) < 2 {
-		t.Fatalf("expected at least 2 sheets, got %v", sheets)
-	}
-
-	val, _ := f.GetCellValue("Data", "A1")
-	if val != "timestamp_s" {
-		t.Errorf("A1 = %q, want \"timestamp_s\"", val)
-	}
-	val, _ = f.GetCellValue("Data", "B1")
-	if val != "voltage" {
-		t.Errorf("B1 = %q, want \"voltage\"", val)
-	}
-	val, _ = f.GetCellValue("Data", "C1")
-	if val != "trigger" {
-		t.Errorf("C1 = %q, want \"trigger\"", val)
-	}
-
-	rows, _ := f.GetRows("Data")
-	if len(rows) != 6 {
-		t.Errorf("Data sheet has %d rows, want 6", len(rows))
-	}
-
-	val, _ = f.GetCellValue("Data", "A2")
-	if val != "0" {
-		t.Errorf("A2 = %q, want \"0\"", val)
-	}
-	val, _ = f.GetCellValue("Data", "B2")
-	if val != "0" {
-		t.Errorf("B2 = %q, want \"0\"", val)
-	}
-
-	val, _ = f.GetCellValue("Metadata", "A1")
-	if val != "Device Model" {
-		t.Errorf("Metadata A1 = %q, want \"Device Model\"", val)
-	}
-	val, _ = f.GetCellValue("Metadata", "B1")
-	if val != "USB-1808X" {
-		t.Errorf("Metadata B1 = %q, want \"USB-1808X\"", val)
-	}
-}
 
 func TestSQLite_Basic(t *testing.T) {
 	r := testReader(t)

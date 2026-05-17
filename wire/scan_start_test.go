@@ -39,11 +39,11 @@ func TestPacerPeriod(t *testing.T) {
 		freq float64
 		want uint32
 	}{
-		{100000, 999},     // 100 kHz
-		{50000, 1999},     // 50 kHz
-		{200000, 499},     // 200 kHz
-		{0, 0},            // external clock
-		{-1, 0},           // external clock
+		{100000, 999},  // 100 kHz
+		{50000, 1999},  // 50 kHz
+		{200000, 499},  // 200 kHz
+		{0, 0},         // external clock
+		{-1, 0},        // external clock
 	}
 	for _, tt := range tests {
 		got := PacerPeriod(tt.freq)

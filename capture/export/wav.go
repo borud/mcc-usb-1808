@@ -5,7 +5,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/borud/mcc-usb-1808/v3/capture"
+	"github.com/borud/mcc-usb-1808/v4/capture"
 )
 
 // WAV writes all remaining frames from r as a WAV audio file to w.
