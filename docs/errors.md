@@ -1,7 +1,8 @@
 # Errors
 
 The library defines sentinel errors for common failure conditions. All are
-declared as package-level `var` values and can be matched with `errors.Is`.
+declared as package-level `var` values in the `device` package and can be
+matched with `errors.Is`.
 
 | Error                  | Description                                         |
 |------------------------|-----------------------------------------------------|
@@ -15,18 +16,14 @@ declared as package-level `var` values and can be matched with `errors.Is`.
 | `ErrInvalidMode`       | Unrecognized input mode (mode 2 is undefined).      |
 | `ErrTransferFailed`    | USB transfer did not complete.                      |
 | `ErrTimeout`           | USB transfer timed out.                             |
-| `ErrNotInitialized`    | `Init` has not been called.                         |
-| `ErrAOutScanRunning`   | Cannot write single AOut value during output scan.  |
-| `ErrInvalidTimer`      | Timer index out of range (valid: 0–1).              |
-| `ErrInvalidCounter`    | Counter index out of range (valid: 0–3).            |
 
 ## Error Wrapping
 
 Some errors include additional context via `fmt.Errorf` with `%w`:
 
 ```go
-err := dev.ConfigureAnalogIn(configs)
-if errors.Is(err, usb1808.ErrInvalidChannel) {
+h, err := dev.CreateScan(cfg)
+if errors.Is(err, device.ErrInvalidChannel) {
     // handle bad channel number
 }
 ```

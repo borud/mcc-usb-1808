@@ -14,16 +14,16 @@ type Calibration struct {
 }
 ```
 
-- ADC: 8 channels x 4 ranges = 32 coefficient pairs (EEPROM 0x7000–0x70FF)
-- DAC: 2 channels = 2 coefficient pairs (EEPROM 0x7100–0x710F)
+- ADC: 8 channels x 4 ranges = 32 coefficient pairs (EEPROM 0x7000-0x70FF)
+- DAC: 2 channels = 2 coefficient pairs (EEPROM 0x7100-0x710F)
 
 ## Accessing Calibration Tables
 
 After `Init`, the calibration tables can be inspected:
 
 ```go
-adcCal := dev.AnalogInCalTable()   // [8][4]Calibration
-dacCal := dev.AnalogOutCalTable()  // [2]Calibration
+adcCal := dev.CalibrationTable()    // [8][4]Calibration
+dacCal := dev.AnalogOutCalTable()   // [2]Calibration
 ```
 
 ## Calibration Date
@@ -40,18 +40,17 @@ The date is stored at EEPROM address 0x7110 as 6 bytes: year offset from
 
 ## How Calibration Is Applied
 
-**Analog input** (`AnalogInToVolts`):
+**Analog input** (`Calibration.ToVolts`):
 
 1. Mask raw value to 18 bits.
 2. Apply: `cal = raw * slope + offset`
 3. Clamp unipolar ranges to [0, 262143].
 4. Round and convert to voltage based on range.
 
-**Analog output** (`VoltsToAnalogOut`):
-
-1. Convert voltage to raw: `raw = voltage / 10.0 * 32768.0 + 32768.0`
-2. Apply: `cal = raw * slope + offset`
-3. Clamp to [0, 65535].
+```go
+cal := dev.CalibrationTable()
+v := cal[channel][rangeCode].ToVolts(rawValue, rangeCode)
+```
 
 ## Device Identity
 

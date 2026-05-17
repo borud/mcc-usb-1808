@@ -230,13 +230,10 @@ The `capture/export` package converts capture files to other formats. Each
 function consumes the reader -- create a new reader for each export.
 
 ```go
-import "github.com/borud/mcc-usb-1808/capture/export"
+import "github.com/borud/mcc-usb-1808/v4/capture/export"
 
 // CSV
 export.CSV(csvWriter, reader)
-
-// Excel (.xlsx)
-export.Excel("output.xlsx", reader)
 
 // SQLite
 export.SQLite("output.db", reader)
@@ -254,12 +251,6 @@ Writes a `timestamp_s` column followed by one column per channel. Capture
 metadata is included as `#` comment lines before the data. Channel columns use
 `Frame.Values()`: analog channels are calibrated voltages, while digital,
 counter, and encoder channels are raw values converted to `float64`.
-
-### Excel
-
-Creates a workbook with a **Data** sheet (timestamp + channel values) and a
-**Metadata** sheet (key-value pairs). Uses streaming writes for large captures.
-Rows are truncated at Excel's 1,048,576 row limit.
 
 ### SQLite
 

@@ -14,7 +14,7 @@ This library helps you write applications that interface with the Measurement [C
 ## Installation
 
 ```sh
-go get github.com/borud/mcc-usb-1808
+go get github.com/borud/mcc-usb-1808/v4
 ```
 
 ## Quick Start
@@ -26,11 +26,11 @@ import (
     "fmt"
     "log"
 
-    "github.com/borud/mcc-usb-1808"
+    "github.com/borud/mcc-usb-1808/v4/device"
 )
 
 func main() {
-    dev, err := usb1808.Open()
+    dev, err := device.Open()
     if err != nil {
         log.Fatal(err)
     }
@@ -40,26 +40,29 @@ func main() {
         log.Fatal(err)
     }
 
-    // Configure all channels for ±10V differential.
-    configs := make([]usb1808.AnalogInChannelConfig, usb1808.NumAInChannels)
-    for i := range configs {
-        configs[i] = usb1808.AnalogInChannelConfig{
-            Channel: i,
-            Range:   usb1808.BP10V,
-            Mode:    usb1808.Differential,
-        }
-    }
-    if err := dev.ConfigureAnalogIn(configs); err != nil {
-        log.Fatal(err)
+    // Scan 4 analog channels at 10 kHz.
+    cfg := device.ScanConfig{
+        Channels: []device.ChannelConfig{
+            {Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
+            {Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
+            {Index: 2, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
+            {Index: 3, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
+        },
+        Rate: 10000,
+        Count: 100,
     }
 
-    volts, err := dev.AnalogIn()
+    h, err := dev.CreateScan(cfg)
     if err != nil {
         log.Fatal(err)
     }
-    for i, v := range volts {
-        fmt.Printf("CH%d: %+9.4f V\n", i, v)
+    if err := h.Start(); err != nil {
+        log.Fatal(err)
     }
+    for chunk := range h.Chunks() {
+        fmt.Printf("received %d bytes\n", len(chunk))
+    }
+    h.Stop()
 }
 ```
 
@@ -68,16 +71,17 @@ func main() {
 A command-line tool is included for quick testing. Install it with:
 
 ```sh
-go install github.com/borud/mcc-usb-1808/cmd/daq@latest
+go install github.com/borud/mcc-usb-1808/v4/cmd/daq@latest
 ```
 
 Example usage:
 
 ```sh
-daq info                                                # Device info
-daq blink --count 5                                     # Blink LED
-daq analog read --range bp10v                           # Single read (±10V)
-daq analog scan --channels 0-3 --rate 10000 --count 100 # Continuous scan
+daq info                                             # Device info
+daq blink --count 5                                  # Blink LED
+daq capture --channels analog --rate 10k             # Capture all 8 analog channels
+daq capture --channels ain0-ain3:bp10v:diff,dio      # Mixed channel spec
+daq bench --channels analog --rate 200k --duration 10 # Benchmark throughput
 ```
 
 ## Documentation
@@ -86,14 +90,10 @@ See the [docs/](docs/README.md) directory for the full manual:
 
 - [Getting Started](docs/getting-started.md)
 - [Analog Input](docs/analog-input.md)
-- [Analog Output](docs/analog-output.md)
-- [Digital I/O](docs/digital-io.md)
-- [Counters and Encoders](docs/counters-encoders.md)
-- [Timers](docs/timers.md)
-- [Triggers](docs/triggers.md)
 - [Calibration](docs/calibration.md)
 - [Capture](docs/capture.md)
 - [CLI Tool](docs/cli.md)
+- [High-Rate Capture](docs/high-rate-capture.md)
 - [Errors](docs/errors.md)
 
 ## If you use this

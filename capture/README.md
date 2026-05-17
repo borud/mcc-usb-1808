@@ -117,7 +117,7 @@ The `capture/export` sub-package converts capture files to common formats.
 Each function reads all remaining frames from a `*capture.Reader`.
 
 ```go
-import "github.com/borud/mcc-usb-1808/capture/export"
+import "github.com/borud/mcc-usb-1808/v4/capture/export"
 ```
 
 ### CSV
@@ -144,21 +144,6 @@ timestamp_s,voltage,current,trigger
 0,1.234,-0.567,255
 0.00001,1.235,-0.566,255
 ```
-
-### Excel
-
-```go
-r, _ := capture.NewReader(captureFile)
-defer r.Close()
-
-export.Excel("data.xlsx", r)
-```
-
-Creates a workbook with two sheets:
-- **Data** -- timestamp_s + one column per channel (streaming writer, handles large captures).
-- **Metadata** -- key-value pairs of all header fields and properties.
-
-Excel has a hard limit of 1,048,576 rows per sheet.
 
 ### SQLite
 

@@ -11,10 +11,10 @@ Each channel can be configured with a voltage range and input mode.
 
 | Constant | Range     | Type     |
 |----------|-----------|----------|
-| `BP10V`  | ±10V      | Bipolar  |
-| `BP5V`   | ±5V       | Bipolar  |
-| `UP10V`  | 0–10V     | Unipolar |
-| `UP5V`   | 0–5V      | Unipolar |
+| `BP10V`  | +/-10V    | Bipolar  |
+| `BP5V`   | +/-5V     | Bipolar  |
+| `UP10V`  | 0-10V     | Unipolar |
+| `UP5V`   | 0-5V      | Unipolar |
 
 **Input modes:**
 
@@ -27,65 +27,6 @@ Each channel can be configured with a voltage range and input mode.
 Mode code 2 is undefined by the hardware and is rejected with
 `ErrInvalidMode`.
 
-## Configuration
-
-Configure all 8 channels before reading. Each channel gets a range and mode:
-
-```go
-configs := make([]usb1808.AnalogInChannelConfig, usb1808.NumAInChannels)
-for i := range configs {
-    configs[i] = usb1808.AnalogInChannelConfig{
-        Channel: i,
-        Range:   usb1808.BP10V,
-        Mode:    usb1808.Differential,
-    }
-}
-if err := dev.ConfigureAnalogIn(configs); err != nil {
-    log.Fatal(err)
-}
-```
-
-To read back the current configuration:
-
-```go
-configs, err := dev.AnalogInConfig()
-```
-
-## Single Read
-
-Read all 8 channels as calibrated voltages:
-
-```go
-volts, err := dev.AnalogIn()
-// volts is [8]float64
-```
-
-Or as raw 18-bit ADC values:
-
-```go
-raw, err := dev.AnalogInRaw()
-// raw is [8]uint32
-```
-
-## Voltage Conversion
-
-`AnalogInToVolts` converts a raw 18-bit value to voltage using the device's
-calibration coefficients:
-
-```go
-v := dev.AnalogInToVolts(rawValue, channel, usb1808.BP10V)
-```
-
-The conversion applies the factory calibration slope and offset, then maps the
-result to the voltage range:
-
-- Bipolar ±10V: `(cal - 131072) * 10 / 131072`
-- Bipolar ±5V: `(cal - 131072) * 5 / 131072`
-- Unipolar 0–10V: `cal * 10 / 262143`
-- Unipolar 0–5V: `cal * 5 / 262143`
-
-Unipolar values are clamped to `[0, 262143]` before conversion.
-
 ## Continuous Scanning
 
 For high-speed continuous acquisition, use the scan engine. The FPGA maintains
@@ -96,52 +37,60 @@ I/O, counters, and encoders.
 
 | Constant           | Value | Source              |
 |--------------------|-------|---------------------|
-| `ScanChanAIn0`–`7` | 0–7   | Analog input 0–7    |
+| `ScanChanAIn0`-`7` | 0-7   | Analog input 0-7    |
 | `ScanChanDIO`      | 8     | Digital I/O         |
 | `ScanChanCounter0` | 9     | Event counter 0     |
 | `ScanChanCounter1` | 10    | Event counter 1     |
 | `ScanChanEncoder0` | 11    | Quadrature encoder 0|
 | `ScanChanEncoder1` | 12    | Quadrature encoder 1|
 
-### Using ScanAnalogIn
+### Using CreateScan
 
-`ScanAnalogIn` is a pull-based iterator that configures the queue, starts the
-scan, reads data, converts to calibrated voltages, and stops the scan on
-completion. Each iteration yields one scan frame (one value per channel).
+`CreateScan` configures the hardware and returns a `*ScanHandle`. Call `Start`
+to begin acquisition, read from `Chunks()`, and `Stop` to end.
 
 ```go
-ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-defer cancel()
-
-cfg := usb1808.AnalogInScanConfig{
-    Channels: []int{0, 1, 2, 3},  // Channels to sample.
-    Rate:     10000.0,             // 10 kHz per channel.
-    Count:    1000,                // 1000 scans (0 = continuous).
+cfg := device.ScanConfig{
+    Channels: []device.ChannelConfig{
+        {Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
+        {Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
+        {Index: 8, Type: device.ChannelTypeDIO},
+    },
+    Rate:  10000, // 10 kHz per channel
+    Count: 1000,  // 1000 scans (0 = continuous)
 }
 
-for frame, err := range dev.ScanAnalogIn(ctx, cfg) {
-    if err != nil {
-        log.Fatal(err)
-    }
-    // frame is []float64 with one value per channel.
-    fmt.Println(frame)
+h, err := dev.CreateScan(cfg)
+if err != nil {
+    log.Fatal(err)
 }
+if err := h.Start(); err != nil {
+    log.Fatal(err)
+}
+for chunk := range h.Chunks() {
+    // chunk is []byte, packed little-endian uint32s
+    // len(chunk) is a multiple of frameSize (nChannels * 4)
+}
+h.Stop()
 ```
 
-Non-analog channels (DIO, counters, encoders) are returned as raw `float64`
-values without voltage conversion.
+### ScanConfig
 
-### AnalogInScanConfig
+| Field      | Type             | Description                              |
+|------------|------------------|------------------------------------------|
+| `Channels` | `[]ChannelConfig`| Scan queue channel configurations.       |
+| `Rate`     | `int`            | Sample rate in Hz per channel.           |
+| `Count`    | `uint32`         | Total scans. 0 = continuous.             |
+| `Options`  | `uint8`          | Scan option flags (see below).           |
 
-| Field           | Type      | Description                              |
-|-----------------|-----------|------------------------------------------|
-| `Channels`      | `[]int`   | Scan queue channel selectors (0–12).     |
-| `Rate`          | `float64` | Sample rate in Hz per channel.           |
-| `Count`         | `uint32`  | Total scans. 0 = continuous.             |
-| `RetrigCount`   | `uint32`  | Scans per retrigger. 0 = no retrigger.   |
-| `Options`       | `uint8`   | Scan option flags (see below).           |
-| `PacketSize`    | `uint8`   | Samples-1 per USB packet (0xFF = max).   |
-| `PipelineDepth` | `int`     | Read-ahead batches buffered (default 32).|
+### ChannelConfig
+
+| Field   | Type          | Description                       |
+|---------|---------------|-----------------------------------|
+| `Index` | `int`         | Queue channel selector (0-12).    |
+| `Type`  | `ChannelType` | Analog, DIO, Counter, or Encoder. |
+| `Range` | `Range`       | Voltage range (analog only).      |
+| `Mode`  | `InputMode`   | Input mode (analog only).         |
 
 **Scan option flags:**
 
@@ -153,58 +102,55 @@ values without voltage conversion.
 | `ScanOptCounterValue`     | `0x08` | Maintain counter on scan start.|
 | `ScanOptSingleIO`         | `0x10` | Single-sample transfer mode.   |
 
-### Low-Level Scan API
+### ScanOption Functions
 
-For more control, use the individual scan methods:
+| Option                   | Default | Description                           |
+|--------------------------|---------|---------------------------------------|
+| `WithPipelineDepth(n)`   | 32      | Read-ahead batches buffered.          |
+| `WithConcurrentReaders(n)` | 4    | Goroutines issuing USB bulk reads.    |
 
-```go
-// Configure scan queue.
-dev.ConfigureAnalogInScan([]int{0, 1, 2, 3})
+### Decoding Scan Data
 
-// Start the scan.
-dev.StartAnalogInScan(cfg)
-
-// Read calibrated voltages (nScans at a time).
-volts, err := dev.ReadAnalogInScan(ctx, 100)
-
-// Or read raw uint32 values.
-raw, err := dev.ReadAnalogInScanRaw(ctx, nChannels, nScans, timeout)
-
-// Stop the scan.
-dev.StopAnalogInScan()
-```
-
-### High-Throughput Scan APIs
-
-For sustained high-rate capture, use `ScanAnalogInRaw` or `ScanAnalogInBulk`
-instead of `ScanAnalogIn`. These avoid per-sample calibration overhead and use
-a multi-reader USB pipeline.
-
-`ScanAnalogInRaw` yields raw `[]uint32` frames without voltage conversion:
+Use the `codec` package to decode raw chunks into typed values:
 
 ```go
-for frame, err := range dev.ScanAnalogInRaw(ctx, cfg) {
-    // frame is []uint32
+import "github.com/borud/mcc-usb-1808/v4/codec"
+
+dec := codec.NewDecoder(cfg.Channels, dev.CalibrationTable())
+for chunk := range h.Chunks() {
+    for frame := range dec.Frames(chunk) {
+        voltage := frame.Voltage(0)  // calibrated voltage for channel 0
+        dio := frame.Digital()       // digital I/O byte
+    }
 }
 ```
 
-`ScanAnalogInBulk` yields raw `[]byte` slices directly from USB bulk
-transfers, with no unpacking. This is the path used by `daq capture`:
+### Voltage Conversion
+
+`Calibration.ToVolts` converts a raw 18-bit ADC value to voltage using
+factory calibration coefficients:
 
 ```go
-for data, err := range dev.ScanAnalogInBulk(ctx, cfg) {
-    // data is []byte, packed little-endian uint32s
-}
+cal := dev.CalibrationTable()
+v := cal[channel][rangeCode].ToVolts(rawValue, rangeCode)
 ```
 
-Both APIs use a configurable read-ahead pipeline (`PipelineDepth`, default 32
-batches) with multiple concurrent USB readers to keep the device FIFO drained.
+The conversion applies the factory calibration slope and offset, then maps the
+result to the voltage range:
+
+- Bipolar +/-10V: `(cal - 131072) * 10 / 131072`
+- Bipolar +/-5V: `(cal - 131072) * 5 / 131072`
+- Unipolar 0-10V: `cal * 10 / 262143`
+- Unipolar 0-5V: `cal * 5 / 262143`
+
+Unipolar values are clamped to `[0, 262143]` before conversion.
 
 ### Overrun Handling
 
 If the host does not read data fast enough, the device FIFO overruns.
-`ReadAnalogInScanRaw` detects this via the status register and returns
-`ErrScanOverrun` after stopping the scan and clearing the FIFO.
+The scan handle detects this via the status register and reports
+`ErrScanOverrun` via `ScanHandle.Err()` after stopping the scan and clearing
+the FIFO.
 
 See [High-Rate Capture Troubleshooting](high-rate-capture.md) for tuning
 guidance when overruns occur at high sample rates.
