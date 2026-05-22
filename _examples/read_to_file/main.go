@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
 	"github.com/borud/mcc-usb-1808/v4/device"
@@ -27,7 +28,7 @@ func main() {
 	scanConfig := device.ScanConfig{
 		Channels: channelConfig,
 		Rate:     200_000,
-		Count:    100_000,
+		Count:    200_000,
 	}
 
 	scan, err := dev.CreateScan(scanConfig)
@@ -43,8 +44,8 @@ func main() {
 	captureWriter, err := capture.NewWriter(
 		"recordings",
 		header,
-		capture.WithFileSize(1024*1024*100),
-		capture.WithBufferSize(1024*8),
+		//capture.WithFileSize(1024*1024*100),
+		//capture.WithBufferSize(1024*8),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -56,4 +57,9 @@ func main() {
 		captureWriter.WriteBulk(chunk.Data)
 	}
 
+	if scan.Err() != nil {
+		log.Fatal(scan.Err())
+	}
+
+	slog.Info("frames written", "num", captureWriter.FramesWritten())
 }

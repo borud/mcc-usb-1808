@@ -2,9 +2,7 @@ package device
 
 import (
 	"fmt"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/borud/mcc-usb-1808/v4/transport"
@@ -43,8 +41,7 @@ type ScanHandle struct {
 	err        error
 	mu         sync.Mutex
 	state      scanState
-	stopOnce   sync.Once
-	poolMisses atomic.Int64
+	stopOnce sync.Once
 }
 
 // CreateScan configures the hardware for scanning and returns a handle.
@@ -55,8 +52,7 @@ func (d *Device) CreateScan(cfg ScanConfig, opts ...ScanOption) (*ScanHandle, er
 	}
 
 	o := scanOptions{
-		pipelineDepth:     DefaultPipelineDepth,
-		concurrentReaders: DefaultConcurrentReaders,
+		pipelineDepth: DefaultPipelineDepth,
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -133,11 +129,12 @@ func (h *ScanHandle) Start() error {
 		return fmt.Errorf("clear FIFO: %w", err)
 	}
 
-	// Check if async path is available.
-	if ar, ok := h.dev.transport.(transport.AsyncBulkReader); ok {
-		return h.startAsync(ar)
+	ar, ok := h.dev.transport.(transport.AsyncBulkReader)
+	if !ok {
+		close(h.done)
+		return fmt.Errorf("transport does not support async bulk reads")
 	}
-	return h.startSync()
+	return h.startAsync(ar)
 }
 
 // Stop stops the scan and waits for all readers to finish.
@@ -196,188 +193,6 @@ func (h *ScanHandle) setErr(err error) {
 	h.mu.Unlock()
 }
 
-// startSync launches the scan using synchronous bulk reads.
-func (h *ScanHandle) startSync() error {
-	nCh := len(h.channels)
-	rate := float64(h.rate)
-	batch := scanBatchSize(rate, nCh)
-	batchBytes := batch * nCh * 4
-	readTimeout := scanReadTimeout(rate, batch)
-
-	// Compute packet size.
-	packetSize := uint8(0xFF)
-	samplesPerScan := nCh
-	if rate*float64(samplesPerScan) < MaxPacketSize/4 {
-		packetSize = uint8(min(samplesPerScan, 256) - 1)
-	}
-
-	// Start the scan.
-	pacerPeriod := wire.PacerPeriod(rate)
-	payload := wire.AInScanStartPayload(h.count, 0, pacerPeriod, packetSize, h.options)
-	h.dev.mu.Lock()
-	err := h.dev.transport.ControlOut(cmdAInScanStart, 0, 0, payload)
-	h.dev.mu.Unlock()
-	if err != nil {
-		close(h.done)
-		return err
-	}
-
-	go h.runSyncReaders(batchBytes, readTimeout)
-	return nil
-}
-
-func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
-	defer close(h.done)
-	defer close(h.chunks)
-	defer func() {
-		// Signal all reader goroutines and flush pending USB reads so
-		// they can unwind.  Safe to call even if Stop() already ran
-		// (stopOnce prevents double-close, redundant commands are harmless).
-		h.stopOnce.Do(func() { close(h.stop) })
-		h.dev.mu.Lock()
-		_ = h.dev.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
-		_ = h.dev.transport.ControlOut(cmdAInBulkFlush, 0, 0, nil)
-		h.dev.mu.Unlock()
-	}()
-	defer func() {
-		if n := h.poolMisses.Load(); n > 0 {
-			h.dev.log.Warn("buffer pool exhausted during scan", "misses", n)
-		}
-	}()
-
-	numReaders := h.opts.concurrentReaders
-	poolSize := h.opts.pipelineDepth + numReaders
-	free := make(chan []byte, poolSize)
-	for range poolSize {
-		free <- make([]byte, batchBytes)
-	}
-
-	type readResult struct {
-		buf []byte
-		n   int
-		err error
-	}
-	ch := make(chan readResult, h.opts.pipelineDepth)
-
-	var readerWg sync.WaitGroup
-	for range numReaders {
-		readerWg.Add(1)
-		go func() {
-			runtime.LockOSThread()
-			defer runtime.UnlockOSThread()
-			defer readerWg.Done()
-
-			for {
-				select {
-				case <-h.stop:
-					return
-				default:
-				}
-
-				var buf []byte
-				select {
-				case buf = <-free:
-				case <-h.stop:
-					return
-				default:
-					buf = make([]byte, batchBytes)
-					h.poolMisses.Add(1)
-				}
-
-				n, err := h.dev.transport.BulkReadInto(epBulkIn, buf, readTimeout)
-				if err != nil && n == 0 {
-					free <- buf
-					// Check for overrun.
-					h.dev.mu.Lock()
-					sd, se := h.dev.transport.ControlIn(cmdStatus, 0, 0, 2)
-					if se == nil {
-						if Status(wire.Uint16LE(sd)).AInScanOverrun() {
-							_ = h.dev.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
-							_ = h.dev.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
-							err = ErrScanOverrun
-						}
-					}
-					h.dev.mu.Unlock()
-					select {
-					case ch <- readResult{nil, 0, err}:
-					case <-h.stop:
-					}
-					return
-				}
-
-				select {
-				case ch <- readResult{buf, n, nil}:
-				case <-h.stop:
-					free <- buf
-					return
-				}
-			}
-		}()
-	}
-	go func() {
-		readerWg.Wait()
-		close(ch)
-	}()
-
-	// For finite scans, start a watchdog that aborts stuck readers if
-	// the scan doesn't complete within the expected time plus a grace
-	// period.  On macOS, BulkReadInto can block past its timeout after
-	// the device finishes sending; the BulkFlush unblocks it.
-	if h.count > 0 {
-		expected := time.Duration(float64(h.count) / float64(h.rate) * float64(time.Second))
-		watchdog := time.AfterFunc(expected+2*readTimeout, func() {
-			h.stopOnce.Do(func() { close(h.stop) })
-			h.dev.mu.Lock()
-			_ = h.dev.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
-			_ = h.dev.transport.ControlOut(cmdAInBulkFlush, 0, 0, nil)
-			h.dev.mu.Unlock()
-		})
-		defer watchdog.Stop()
-	}
-
-	total := h.count
-	var framesRead uint32
-
-	for result := range ch {
-		if result.err != nil {
-			h.setErr(result.err)
-			return
-		}
-
-		data := result.buf[:result.n]
-		// Truncate to frame boundary.
-		data = data[:len(data)/h.frameSize*h.frameSize]
-
-		if total > 0 {
-			remaining := int(total-framesRead) * h.frameSize
-			if len(data) > remaining {
-				data = data[:remaining]
-			}
-		}
-
-		nFrames := len(data) / h.frameSize
-		if nFrames > 0 {
-			select {
-			case h.chunks <- Chunk{
-				Data:       data,
-				FrameStart: int(framesRead),
-				FrameCount: nFrames,
-			}:
-			case <-h.stop:
-				free <- result.buf
-				return
-			}
-		} else {
-			free <- result.buf
-		}
-
-		framesRead += uint32(nFrames)
-		if total > 0 && framesRead >= total {
-			return
-		}
-	}
-}
-
 // startAsync launches the scan using an async bulk transfer ring.
 func (h *ScanHandle) startAsync(ar transport.AsyncBulkReader) error {
 	nCh := len(h.channels)
@@ -413,7 +228,7 @@ func (h *ScanHandle) startAsync(ar transport.AsyncBulkReader) error {
 	return nil
 }
 
-func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
+func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 	defer close(h.done)
 	defer close(h.chunks)
 	defer ring.Stop()

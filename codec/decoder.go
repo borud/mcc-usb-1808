@@ -14,7 +14,7 @@ var ErrNoChannels = errors.New("codec: no channels")
 // Decoder decodes raw scan chunks into frames and typed values.
 type Decoder struct {
 	channels  []device.ChannelConfig
-	cal       device.CalibrationTable
+	coeffs    []voltCoeff
 	frameSize int // bytes per frame
 }
 
@@ -28,7 +28,7 @@ func NewDecoder(channels []device.ChannelConfig, cal device.CalibrationTable) (*
 	copy(ch, channels)
 	return &Decoder{
 		channels:  ch,
-		cal:       cal,
+		coeffs:    makeCoeffs(ch, cal),
 		frameSize: len(ch) * 4,
 	}, nil
 }
@@ -45,8 +45,8 @@ func (d *Decoder) FrameSize() int {
 func (d *Decoder) Frames(chunk []byte) iter.Seq[*Frame] {
 	return func(yield func(*Frame) bool) {
 		f := &Frame{
+			coeffs:   d.coeffs,
 			channels: d.channels,
-			cal:      &d.cal,
 		}
 		for off := 0; off+d.frameSize <= len(chunk); off += d.frameSize {
 			f.data = chunk[off : off+d.frameSize]
@@ -56,3 +56,51 @@ func (d *Decoder) Frames(chunk []byte) iter.Seq[*Frame] {
 		}
 	}
 }
+
+// DecodeVoltages decodes an entire chunk into calibrated voltages, writing
+// them sequentially into dst (frame0_ch0, frame0_ch1, ..., frame1_ch0, ...).
+// Returns the number of frames decoded. The caller must ensure dst has room
+// for at least NumFrames(chunk) * len(channels) elements.
+func (d *Decoder) DecodeVoltages(chunk []byte, dst []float64) int {
+	numCh := len(d.coeffs)
+	frameSize := d.frameSize
+	coeffs := d.coeffs
+	n := 0
+
+	for off := 0; off+frameSize <= len(chunk); off += frameSize {
+		for i := range numCh {
+			c := &coeffs[i]
+			raw := uint32(chunk[off+i*4]) |
+				uint32(chunk[off+i*4+1])<<8 |
+				uint32(chunk[off+i*4+2])<<16 |
+				uint32(chunk[off+i*4+3])<<24
+			if !c.analog {
+				dst[n] = float64(raw)
+			} else {
+				v := float64(raw&0x3FFFF)*c.scale + c.offset
+				dst[n] = max(c.clampLo, min(c.clampHi, v))
+			}
+			n++
+		}
+	}
+	return n / numCh
+}
+
+// NumFrames returns the number of complete frames in a chunk.
+func (d *Decoder) NumFrames(chunk []byte) int {
+	return len(chunk) / d.frameSize
+}
+
+// MaxSamples returns the maximum number of float64 values that
+// [Decoder.DecodeVoltages] can produce from a single chunk. Use this
+// to pre-allocate a reusable destination buffer:
+//
+//	dst := make([]float64, dec.MaxSamples())
+//	for chunk := range scan.Chunks() {
+//	    nFrames := dec.DecodeVoltages(chunk.Data, dst)
+//	    // use dst[:nFrames*numChannels]
+//	}
+func (d *Decoder) MaxSamples() int {
+	return (device.MaxTransferBytes / d.frameSize) * len(d.coeffs)
+}
+

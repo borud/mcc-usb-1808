@@ -3,7 +3,7 @@ package device
 import "time"
 
 // scanBatchSize computes the number of scans to read per USB bulk transfer.
-// Targets ~100ms worth of data per read, capped at maxTransferBytes, aligned
+// Targets ~100ms worth of data per read, capped at MaxTransferBytes, aligned
 // to MaxPacketSize (512) boundaries.
 func scanBatchSize(rate float64, nChannels int) int {
 	n := int(rate * 0.1) // 100ms of data
@@ -12,8 +12,8 @@ func scanBatchSize(rate float64, nChannels int) int {
 	}
 	bytesPerScan := nChannels * 4
 	totalBytes := n * bytesPerScan
-	if totalBytes > maxTransferBytes {
-		totalBytes = maxTransferBytes
+	if totalBytes > MaxTransferBytes {
+		totalBytes = MaxTransferBytes
 	}
 	if totalBytes >= MaxPacketSize {
 		totalBytes = (totalBytes / MaxPacketSize) * MaxPacketSize

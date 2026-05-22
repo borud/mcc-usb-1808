@@ -117,7 +117,6 @@ for chunk := range h.Chunks() {
 | Option                   | Default | Description                           |
 |--------------------------|---------|---------------------------------------|
 | `WithPipelineDepth(n)`   | 32      | Read-ahead batches buffered.          |
-| `WithConcurrentReaders(n)` | 4    | Goroutines issuing USB bulk reads.    |
 
 ### Decoding Scan Data
 

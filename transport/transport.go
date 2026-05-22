@@ -30,3 +30,23 @@ type Transport interface {
 	// Close releases the USB device and any associated resources.
 	Close() error
 }
+
+// RingResult holds one completed async bulk transfer.
+type RingResult struct {
+	Data []byte
+	Err  error
+}
+
+// BulkRing is the interface for an async bulk transfer ring.
+// Implementations deliver completed transfers via Results and can be
+// stopped with Stop.
+type BulkRing interface {
+	Results() <-chan RingResult
+	Stop()
+}
+
+// AsyncBulkReader is an optional interface that Transport implementations
+// can provide to support async bulk transfer rings.
+type AsyncBulkReader interface {
+	NewBulkRing(endpoint uint8, bufSize, count, depth int, timeoutMs uint) (BulkRing, error)
+}

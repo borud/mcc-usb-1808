@@ -14,32 +14,18 @@ type ScanConfig struct {
 type ScanOption func(*scanOptions)
 
 type scanOptions struct {
-	pipelineDepth     int
-	concurrentReaders int
+	pipelineDepth int
 }
 
 // DefaultPipelineDepth is the number of bulk read results to buffer ahead
 // of the consumer.
 const DefaultPipelineDepth = 32
 
-// DefaultConcurrentReaders is the number of goroutines concurrently issuing
-// synchronous USB bulk reads.
-const DefaultConcurrentReaders = 4
-
 // WithPipelineDepth sets the pipeline depth (buffered read-ahead batches).
 func WithPipelineDepth(n int) ScanOption {
 	return func(o *scanOptions) {
 		if n > 0 {
 			o.pipelineDepth = n
-		}
-	}
-}
-
-// WithConcurrentReaders sets the number of concurrent reader goroutines.
-func WithConcurrentReaders(n int) ScanOption {
-	return func(o *scanOptions) {
-		if n > 0 {
-			o.concurrentReaders = n
 		}
 	}
 }

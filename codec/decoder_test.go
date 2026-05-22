@@ -237,3 +237,103 @@ func FuzzCalibrate(f *testing.F) {
 		}
 	})
 }
+
+func BenchmarkVoltage(b *testing.B) {
+	const numCh = 8
+	const numFrames = 1000
+
+	cal := identityCal()
+	channels := make([]device.ChannelConfig, numCh)
+	for i := range numCh {
+		channels[i] = device.ChannelConfig{
+			Index: i,
+			Type:  device.ChannelTypeAnalog,
+			Range: device.BP10V,
+			Mode:  device.SingleEnded,
+		}
+	}
+	dec, _ := NewDecoder(channels, cal)
+
+	chunk := make([]byte, numFrames*numCh*4)
+	for i := range numFrames * numCh {
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%262144))
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	var sink float64
+	for b.Loop() {
+		for frame := range dec.Frames(chunk) {
+			for ch := range numCh {
+				sink += frame.Voltage(ch)
+			}
+		}
+	}
+	_ = sink
+}
+
+func BenchmarkToVolts(b *testing.B) {
+	cal := device.Calibration{Slope: 1.0, Offset: 0.0}
+	b.ResetTimer()
+	b.ReportAllocs()
+	var sink float64
+	for b.Loop() {
+		sink += cal.ToVolts(131072, device.BP10V)
+	}
+	_ = sink
+}
+
+func BenchmarkDecodeVoltages(b *testing.B) {
+	const numCh = 8
+	const numFrames = 1000
+
+	cal := identityCal()
+	channels := make([]device.ChannelConfig, numCh)
+	for i := range numCh {
+		channels[i] = device.ChannelConfig{
+			Index: i, Type: device.ChannelTypeAnalog,
+			Range: device.BP10V, Mode: device.SingleEnded,
+		}
+	}
+	dec, _ := NewDecoder(channels, cal)
+
+	chunk := make([]byte, numFrames*numCh*4)
+	for i := range numFrames * numCh {
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%262144))
+	}
+	dst := make([]float64, numFrames*numCh)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		dec.DecodeVoltages(chunk, dst)
+	}
+}
+
+func BenchmarkVoltageOnly(b *testing.B) {
+	const numCh = 8
+	cal := identityCal()
+	channels := make([]device.ChannelConfig, numCh)
+	for i := range numCh {
+		channels[i] = device.ChannelConfig{
+			Index: i, Type: device.ChannelTypeAnalog,
+			Range: device.BP10V, Mode: device.SingleEnded,
+		}
+	}
+	dec, _ := NewDecoder(channels, cal)
+	data := make([]byte, numCh*4)
+	for i := range numCh {
+		binary.LittleEndian.PutUint32(data[i*4:], uint32(131072+i))
+	}
+	f := &Frame{coeffs: dec.coeffs, channels: dec.channels, data: data}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	var sink float64
+	for b.Loop() {
+		for ch := range numCh {
+			sink += f.Voltage(ch)
+		}
+	}
+	_ = sink
+}

@@ -72,8 +72,8 @@ const usbTimeout = 2000 * time.Millisecond
 // FPGA configuration unlock code.
 const fpgaUnlockCode = 0xAD
 
-// maxTransferBytes is the maximum bytes per USB bulk read.
-const maxTransferBytes = 64 * 1024
+// MaxTransferBytes is the maximum bytes per USB bulk read.
+const MaxTransferBytes = 64 * 1024
 
 // ringTransferCount is the number of async bulk transfers in the ring.
 const ringTransferCount = 32

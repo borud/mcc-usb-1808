@@ -4,8 +4,8 @@
 // The scan loop must keep up with the sample rate.  At 200 kS/s × 8
 // channels the device produces 6.4 MB/s.  If the host doesn't drain
 // Chunks() fast enough, the on-device FIFO overruns and data is lost.
-// To avoid this we collect all frames first, then print after the scan
-// is complete.
+// To avoid this we decode into a pre-allocated buffer and collect all
+// voltages first, then print after the scan is complete.
 package main
 
 import (
@@ -57,16 +57,12 @@ func main() {
 	// per-frame I/O (like fmt.Printf) creates backpressure that stalls
 	// the USB readers, which causes the device FIFO to overrun.
 	nCh := len(channelConfig)
-	voltages := make([][]float64, 0, int(scanConfig.Count))
+	buf := make([]float64, decoder.MaxSamples())
+	voltages := make([]float64, 0, int(scanConfig.Count)*nCh)
 
 	for chunk := range scan.Chunks() {
-		for frame := range decoder.Frames(chunk.Data) {
-			row := make([]float64, nCh)
-			for i := range nCh {
-				row[i] = frame.Voltage(i)
-			}
-			voltages = append(voltages, row)
-		}
+		nFrames := decoder.DecodeVoltages(chunk.Data, buf)
+		voltages = append(voltages, buf[:nFrames*nCh]...)
 	}
 
 	if err := scan.Stop(); err != nil {
@@ -74,13 +70,14 @@ func main() {
 	}
 
 	// Print after the scan is done — safe to be slow here.
-	for i, row := range voltages {
+	totalFrames := len(voltages) / nCh
+	for i := range totalFrames {
 		fmt.Printf("%10d", i+1)
-		for _, v := range row {
-			fmt.Printf(" | %012.8f", v)
+		for ch := range nCh {
+			fmt.Printf(" | %012.8f", voltages[i*nCh+ch])
 		}
 		fmt.Println()
 	}
 
-	fmt.Printf("\n%d frames captured\n", len(voltages))
+	fmt.Printf("\n%d frames captured\n", totalFrames)
 }

@@ -1,9 +1,6 @@
 package device
 
 import (
-	"fmt"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,67 +8,63 @@ import (
 	"github.com/borud/mcc-usb-1808/v4/wire"
 )
 
-// hangingTransport simulates a USB transport where BulkReadInto blocks
-// forever after all data has been delivered — reproducing the macOS
-// behaviour that caused finite scans to hang.  BulkReadInto unblocks
-// when cmdAInBulkFlush is sent via ControlOut (as the watchdog does).
-type hangingTransport struct {
-	mu        sync.Mutex
-	frames    []byte // remaining frame data to deliver
-	frameSize int
-	flushed   chan struct{} // closed by ControlOut(cmdAInBulkFlush)
-	flushOnce sync.Once
-	reads     atomic.Int64
+// mockRingTransport implements both Transport and AsyncBulkReader for testing.
+// It records control calls and returns a mock BulkRing that delivers
+// pre-configured results.
+type mockRingTransport struct {
+	calls   []transport.Call
+	results []transport.RingResult
 }
 
-func newHangingTransport(frameData []byte, frameSize int) *hangingTransport {
-	return &hangingTransport{
-		frames:    append([]byte(nil), frameData...),
-		frameSize: frameSize,
-		flushed:   make(chan struct{}),
-	}
-}
-
-func (h *hangingTransport) ControlOut(request uint8, _, _ uint16, _ []byte) error {
-	if request == cmdAInBulkFlush {
-		h.flushOnce.Do(func() { close(h.flushed) })
-	}
+func (m *mockRingTransport) ControlOut(request uint8, wValue, wIndex uint16, data []byte) error {
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	m.calls = append(m.calls, transport.Call{
+		Method: "ControlOut", Request: request, WValue: wValue, WIndex: wIndex, Data: dataCopy,
+	})
 	return nil
 }
 
-func (h *hangingTransport) ControlIn(_ uint8, _, _ uint16, n int) ([]byte, error) {
+func (m *mockRingTransport) ControlIn(_ uint8, _, _ uint16, n int) ([]byte, error) {
 	return make([]byte, n), nil
 }
 
-func (h *hangingTransport) BulkRead(_ uint8, _ int, _ time.Duration) ([]byte, error) {
-	return nil, fmt.Errorf("not implemented")
+func (m *mockRingTransport) BulkRead(_ uint8, _ int, _ time.Duration) ([]byte, error) {
+	return nil, nil
 }
 
-func (h *hangingTransport) BulkReadInto(_ uint8, buf []byte, _ time.Duration) (int, error) {
-	h.reads.Add(1)
-
-	h.mu.Lock()
-	remaining := len(h.frames)
-	h.mu.Unlock()
-
-	if remaining > 0 {
-		h.mu.Lock()
-		n := copy(buf, h.frames)
-		h.frames = h.frames[n:]
-		h.mu.Unlock()
-		return n, nil
-	}
-
-	// No data left — block until flush (simulates stuck macOS bulk read).
-	<-h.flushed
-	return 0, fmt.Errorf("flushed")
+func (m *mockRingTransport) BulkReadInto(_ uint8, _ []byte, _ time.Duration) (int, error) {
+	return 0, nil
 }
 
-func (h *hangingTransport) BulkWrite(_ uint8, data []byte, _ time.Duration) (int, error) {
+func (m *mockRingTransport) BulkWrite(_ uint8, data []byte, _ time.Duration) (int, error) {
 	return len(data), nil
 }
 
-func (h *hangingTransport) Close() error { return nil }
+func (m *mockRingTransport) Close() error { return nil }
+
+func (m *mockRingTransport) NewBulkRing(_ uint8, _, _, _ int, _ uint) (transport.BulkRing, error) {
+	ch := make(chan transport.RingResult, len(m.results))
+	for _, r := range m.results {
+		ch <- r
+	}
+	close(ch)
+	return &mockBulkRing{ch: ch}, nil
+}
+
+// mockBulkRing implements transport.BulkRing for tests.
+type mockBulkRing struct {
+	ch      chan transport.RingResult
+	stopped bool
+}
+
+func (r *mockBulkRing) Results() <-chan transport.RingResult {
+	return r.ch
+}
+
+func (r *mockBulkRing) Stop() {
+	r.stopped = true
+}
 
 func TestCreateScan_ConfigSendsCorrectTransfers(t *testing.T) {
 	mock := transport.NewMockTransport(
@@ -160,27 +153,22 @@ func TestCreateScan_ValidationErrors(t *testing.T) {
 }
 
 func TestScanHandle_StartAndStop(t *testing.T) {
-	// Build mock that handles: ADC setup, queue config, clear FIFO, scan start,
-	// then bulk reads that return data, then stop/flush commands.
-	nCh := 2
-	frameSize := nCh * 4
-	// Create one frame of data.
-	frameData := make([]byte, frameSize)
-	copy(frameData[0:4], wire.PutUint32LE(131072)) // midscale
-	copy(frameData[4:8], wire.PutUint32LE(262143)) // max
-
-	mock := transport.NewMockTransport(
-		transport.MockResponse{},                // ADC setup
-		transport.MockResponse{},                // scan queue config
-		transport.MockResponse{},                // clear FIFO
-		transport.MockResponse{},                // scan start
-		transport.MockResponse{Data: frameData}, // first bulk read
-		transport.MockResponse{Data: frameData}, // second bulk read
-		transport.MockResponse{Data: frameData}, // third bulk read
-		transport.MockResponse{Data: frameData}, // fourth bulk read — enough for readers
-		// Stop will trigger errors on subsequent reads, causing readers to exit.
+	const (
+		nCh       = 2
+		frameSize = nCh * 4
 	)
-	dev := NewDevice(mock, USB1808)
+
+	frameData := make([]byte, frameSize)
+	copy(frameData[0:4], wire.PutUint32LE(131072))
+	copy(frameData[4:8], wire.PutUint32LE(262143))
+
+	mt := &mockRingTransport{
+		results: []transport.RingResult{
+			{Data: frameData},
+			{Data: frameData},
+		},
+	}
+	dev := NewDevice(mt, USB1808)
 
 	cfg := ScanConfig{
 		Channels: []ChannelConfig{
@@ -190,7 +178,7 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 		Rate:  1000,
 		Count: 2,
 	}
-	h, err := dev.CreateScan(cfg, WithPipelineDepth(4), WithConcurrentReaders(1))
+	h, err := dev.CreateScan(cfg, WithPipelineDepth(4))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +196,6 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 		t.Errorf("chunk size = %d, want >= %d", len(chunk.Data), frameSize)
 	}
 
-	// Channel should close when count is reached or we stop.
 	// Drain remaining.
 	for range h.Chunks() {
 		_ = true // drain
@@ -219,15 +206,11 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 	}
 }
 
-func TestScanHandle_WatchdogUnblocksHangingReaders(t *testing.T) {
-	// Simulate a finite scan where BulkReadInto blocks forever after
-	// the device finishes sending data (the macOS hang).  The watchdog
-	// must send BulkFlush to unblock the readers so Chunks() closes.
+func TestScanHandle_FiniteScanCompletesViaRing(t *testing.T) {
 	const (
 		nCh       = 2
 		frameSize = nCh * 4
 		count     = 10
-		rate      = 100000 // high rate → short expected duration → fast watchdog
 	)
 
 	// Build frame data for exactly `count` frames.
@@ -237,18 +220,22 @@ func TestScanHandle_WatchdogUnblocksHangingReaders(t *testing.T) {
 		copy(allFrames[i*frameSize+4:], wire.PutUint32LE(131072))
 	}
 
-	ht := newHangingTransport(allFrames, frameSize)
-	dev := NewDevice(ht, USB1808)
+	mt := &mockRingTransport{
+		results: []transport.RingResult{
+			{Data: allFrames},
+		},
+	}
+	dev := NewDevice(mt, USB1808)
 
 	cfg := ScanConfig{
 		Channels: []ChannelConfig{
 			{Index: 0, Type: ChannelTypeAnalog, Range: BP10V, Mode: Differential},
 			{Index: 1, Type: ChannelTypeAnalog, Range: BP10V, Mode: Differential},
 		},
-		Rate:  rate,
+		Rate:  100000,
 		Count: count,
 	}
-	h, err := dev.CreateScan(cfg, WithPipelineDepth(4), WithConcurrentReaders(1))
+	h, err := dev.CreateScan(cfg, WithPipelineDepth(4))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +244,6 @@ func TestScanHandle_WatchdogUnblocksHangingReaders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Drain Chunks() — without the watchdog this would hang forever.
 	done := make(chan int)
 	go func() {
 		total := 0
@@ -269,10 +255,10 @@ func TestScanHandle_WatchdogUnblocksHangingReaders(t *testing.T) {
 
 	select {
 	case got := <-done:
-		if got < count {
-			t.Errorf("received %d frames, want >= %d", got, count)
+		if got != count {
+			t.Errorf("received %d frames, want %d", got, count)
 		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("Chunks() did not close — watchdog failed to unblock readers")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Chunks() did not close in time")
 	}
 }

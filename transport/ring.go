@@ -39,28 +39,18 @@ import (
 	"runtime/cgo"
 )
 
-// RingResult holds one completed async bulk transfer.
-type RingResult struct {
-	Data []byte
-	Err  error
-}
-
-// RingStats holds counters for a BulkRing's lifetime.
+// RingStats holds counters for a bulkRing's lifetime.
 type RingStats struct {
 	Submitted uint64
 	Completed uint64
 }
 
-// AsyncBulkReader is an optional interface that Transport implementations
-// can provide to support async bulk transfer rings.
-type AsyncBulkReader interface {
-	NewBulkRing(endpoint uint8, bufSize, count, depth int, timeoutMs uint) (*BulkRing, error)
-}
-
-// BulkRing manages a ring of libusb async bulk transfers. The completion
+// bulkRing manages a ring of libusb async bulk transfers. The completion
 // callback resubmits immediately (memcpy + submit, ~10 µs) so the USB
 // controller always has N transfers queued regardless of Go scheduling.
-type BulkRing struct {
+//
+// bulkRing implements the [BulkRing] interface.
+type bulkRing struct {
 	ctx       *C.libusb_context
 	handle    *C.libusb_device_handle
 	transfers []*C.struct_libusb_transfer
@@ -80,9 +70,9 @@ type BulkRing struct {
 // submits them all, and starts the libusb event loop. Results are delivered
 // on a channel of capacity depth. Call Stop to cancel, drain, and free.
 func NewBulkRing(ctx *C.libusb_context, handle *C.libusb_device_handle,
-	endpoint uint8, bufSize, count, depth int, timeoutMs uint) (*BulkRing, error) {
+	endpoint uint8, bufSize, count, depth int, timeoutMs uint) (BulkRing, error) {
 
-	r := &BulkRing{
+	r := &bulkRing{
 		ctx:       ctx,
 		handle:    handle,
 		transfers: make([]*C.struct_libusb_transfer, count),
@@ -150,12 +140,12 @@ func NewBulkRing(ctx *C.libusb_context, handle *C.libusb_device_handle,
 
 // Results returns the channel that delivers completed transfer data.
 // The channel is closed when the ring is stopped and all transfers drained.
-func (r *BulkRing) Results() <-chan RingResult {
+func (r *bulkRing) Results() <-chan RingResult {
 	return r.results
 }
 
 // Stats returns ring lifetime counters.
-func (r *BulkRing) Stats() RingStats {
+func (r *bulkRing) Stats() RingStats {
 	return RingStats{
 		Submitted: r.submitted.Load(),
 		Completed: r.completed.Load(),
@@ -164,7 +154,7 @@ func (r *BulkRing) Stats() RingStats {
 
 // Stop cancels all in-flight transfers, waits for the event loop to
 // drain them, and frees all C-allocated memory.
-func (r *BulkRing) Stop() {
+func (r *bulkRing) Stop() {
 	if !r.stopped.CompareAndSwap(false, true) {
 		return
 	}
@@ -178,7 +168,7 @@ func (r *BulkRing) Stop() {
 
 // onTransferComplete is called from the C callback (via goRingCallback)
 // on the event loop thread. All invocations are sequential.
-func (r *BulkRing) onTransferComplete(xfer *C.struct_libusb_transfer) {
+func (r *bulkRing) onTransferComplete(xfer *C.struct_libusb_transfer) {
 	if xfer.status == C.LIBUSB_TRANSFER_COMPLETED && !r.stopped.Load() {
 		n := int(xfer.actual_length)
 		r.completed.Add(1)
@@ -235,7 +225,7 @@ func (r *BulkRing) onTransferComplete(xfer *C.struct_libusb_transfer) {
 
 // eventLoop processes libusb events until all pending transfers complete.
 // Must run on a locked OS thread.
-func (r *BulkRing) eventLoop() {
+func (r *bulkRing) eventLoop() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(r.evtDone)
@@ -247,7 +237,7 @@ func (r *BulkRing) eventLoop() {
 }
 
 // cleanup frees the first n transfer/buffer pairs and deletes the cgo handle.
-func (r *BulkRing) cleanup(n int) {
+func (r *bulkRing) cleanup(n int) {
 	for i := range n {
 		if r.buffers[i] != nil {
 			C.free(r.buffers[i])

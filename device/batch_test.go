@@ -22,9 +22,9 @@ func TestScanBatchSize_Invariants(t *testing.T) {
 			if batch < 1 {
 				t.Errorf("rate=%.0f nCh=%d: batch=%d, must be >= 1", rate, nCh, batch)
 			}
-			if totalBytes > maxTransferBytes {
-				t.Errorf("rate=%.0f nCh=%d: totalBytes=%d exceeds maxTransferBytes=%d",
-					rate, nCh, totalBytes, maxTransferBytes)
+			if totalBytes > MaxTransferBytes {
+				t.Errorf("rate=%.0f nCh=%d: totalBytes=%d exceeds MaxTransferBytes=%d",
+					rate, nCh, totalBytes, MaxTransferBytes)
 			}
 			if totalBytes >= MaxPacketSize && MaxPacketSize%bytesPerScan == 0 && totalBytes%MaxPacketSize != 0 {
 				t.Errorf("rate=%.0f nCh=%d: totalBytes=%d not aligned to MaxPacketSize=%d",
@@ -126,8 +126,8 @@ func TestScanBatchSize_ExtremeRates(t *testing.T) {
 			if batch < 1 {
 				t.Fatalf("batch=%d, must be >= 1", batch)
 			}
-			if transferBytes > maxTransferBytes {
-				t.Fatalf("transferBytes=%d > maxTransferBytes=%d", transferBytes, maxTransferBytes)
+			if transferBytes > MaxTransferBytes {
+				t.Fatalf("transferBytes=%d > MaxTransferBytes=%d", transferBytes, MaxTransferBytes)
 			}
 			if timeout <= fillTime {
 				t.Fatalf("timeout=%v <= fillTime=%v", timeout, fillTime)
@@ -158,9 +158,9 @@ func FuzzScanBatchSize(f *testing.F) {
 		if batch < 1 {
 			t.Errorf("rate=%g nCh=%d: batch=%d < 1", rate, nCh, batch)
 		}
-		if transferBytes > maxTransferBytes {
-			t.Errorf("rate=%g nCh=%d: transferBytes=%d > maxTransferBytes=%d",
-				rate, nCh, transferBytes, maxTransferBytes)
+		if transferBytes > MaxTransferBytes {
+			t.Errorf("rate=%g nCh=%d: transferBytes=%d > MaxTransferBytes=%d",
+				rate, nCh, transferBytes, MaxTransferBytes)
 		}
 		if transferBytes >= MaxPacketSize && MaxPacketSize%bytesPerScan == 0 && transferBytes%MaxPacketSize != 0 {
 			t.Errorf("rate=%g nCh=%d: transferBytes=%d not aligned to MaxPacketSize",
