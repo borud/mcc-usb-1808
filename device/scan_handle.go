@@ -19,9 +19,12 @@ const (
 
 // Chunk is a batch of scan frames delivered by [ScanHandle.Chunks].
 type Chunk struct {
-	Data       []byte // Raw frame data (packed little-endian uint32s).
-	FrameStart int    // Index of the first frame in this chunk.
-	FrameCount int    // Number of complete frames in Data.
+	// Data contains raw frame data (packed little-endian uint32s).
+	Data []byte
+	// FrameStart is the index of the first frame in this chunk.
+	FrameStart int
+	// FrameCount is the number of complete frames in Data.
+	FrameCount int
 }
 
 // ScanHandle represents a configured scan that can be started and stopped.
@@ -34,14 +37,15 @@ type ScanHandle struct {
 	options  uint8
 	opts     scanOptions
 
-	frameSize  int // bytes per frame (nChannels * 4)
-	chunks     chan Chunk
-	stop       chan struct{}
-	done       chan struct{}
-	err        error
-	mu         sync.Mutex
-	state      scanState
-	stopOnce sync.Once
+	// frameSize is the number of bytes per frame (nChannels * 4).
+	frameSize int
+	chunks    chan Chunk
+	stop      chan struct{}
+	done      chan struct{}
+	err       error
+	mu        sync.Mutex
+	state     scanState
+	stopOnce  sync.Once
 }
 
 // CreateScan configures the hardware for scanning and returns a handle.

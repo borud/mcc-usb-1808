@@ -5,10 +5,13 @@ import "math"
 
 // USB vendor and product IDs.
 const (
-	VendorID = 0x09DB // Measurement Computing Corporation
+	// VendorID is the USB vendor ID for Measurement Computing Corporation.
+	VendorID = 0x09DB
 
-	PID1808  = 0x013D // USB-1808
-	PID1808X = 0x013E // USB-1808X
+	// PID1808 is the USB product ID for the USB-1808.
+	PID1808 = 0x013D
+	// PID1808X is the USB product ID for the USB-1808X.
+	PID1808X = 0x013E
 )
 
 // Model identifies the hardware variant.
@@ -46,6 +49,15 @@ const (
 	UP5V Range = 3
 )
 
+// 18-bit ADC constants.
+const (
+	// ADCMidscale is the bipolar zero-crossing point of the 18-bit ADC.
+	ADCMidscale = 1 << 17
+
+	// ADCMaxCode is the full-scale code of the 18-bit ADC.
+	ADCMaxCode = 1<<18 - 1
+)
+
 func (r Range) String() string {
 	switch r {
 	case BP10V:
@@ -68,7 +80,8 @@ type InputMode uint8
 const (
 	Differential InputMode = 0
 	SingleEnded  InputMode = 1
-	Grounded     InputMode = 3 // note: 2 is undefined and rejected
+	// Grounded input mode. Note: mode code 2 is undefined and rejected.
+	Grounded InputMode = 3
 )
 
 func (m InputMode) String() string {
@@ -132,19 +145,19 @@ func (c Calibration) ToVolts(raw uint32, r Range) float64 {
 
 	// Clamp for unipolar ranges.
 	if r >= UP10V {
-		calibrated = max(0, min(262143, calibrated))
+		calibrated = max(0, min(ADCMaxCode, calibrated))
 	}
 	calibrated = math.Round(calibrated)
 
 	switch r {
 	case BP10V:
-		return (calibrated - 131072.0) * 10.0 / 131072.0
+		return (calibrated - ADCMidscale) * 10.0 / ADCMidscale
 	case BP5V:
-		return (calibrated - 131072.0) * 5.0 / 131072.0
+		return (calibrated - ADCMidscale) * 5.0 / ADCMidscale
 	case UP10V:
-		return calibrated * 10.0 / 262143.0
+		return calibrated * 10.0 / ADCMaxCode
 	case UP5V:
-		return calibrated * 5.0 / 262143.0
+		return calibrated * 5.0 / ADCMaxCode
 	default:
 		return float64(raw)
 	}
@@ -159,11 +172,13 @@ const (
 	NumAInRanges    = 4
 	NumAOutChannels = 2
 	NumTimers       = 2
-	NumCounters     = 4 // 2 counters + 2 encoders
+	// NumCounters is the total number of counter/encoder channels (2 counters + 2 encoders).
+	NumCounters = 4
 	MaxAInQueue     = 13
 	MaxAOutQueue    = 3
 	MaxPacketSize   = 512
-	BaseClock       = 100_000_000 // 100 MHz
+	// BaseClock is the device master clock frequency in Hz (100 MHz).
+	BaseClock = 100_000_000
 )
 
 // Scan queue channel selectors.
@@ -204,6 +219,8 @@ const (
 
 // Trigger configuration bits.
 const (
-	TriggerEdge = 0x01 // bit 0: 0=level, 1=edge
-	TriggerHigh = 0x02 // bit 1: 0=low/falling, 1=high/rising
+	// TriggerEdge selects edge-triggered mode (bit 0: 0=level, 1=edge).
+	TriggerEdge = 0x01
+	// TriggerHigh selects the active edge/level (bit 1: 0=low/falling, 1=high/rising).
+	TriggerHigh = 0x02
 )

@@ -14,20 +14,21 @@ import (
 	"testing"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/device"
 	parquet "github.com/parquet-go/parquet-go"
 	_ "modernc.org/sqlite"
 )
 
 // testFrames are 5 frames of known raw uint32 data for 2 channels:
 //
-//	ch0: AnalogIn BP10V (midpoint 131072 = 0V, slope=1, offset=0)
+//	ch0: AnalogIn BP10V (midpoint ADCMidscale = 0V, slope=1, offset=0)
 //	ch1: DigitalIO (raw passthrough)
 var testFrameData = [][]uint32{
-	{131072, 0xFF},  // 0V, 255
-	{131073, 0x00},  // ~0V, 0
-	{131074, 0x01},  // ~0V, 1
-	{0, 0x02},       // -10V, 2
-	{0x3FFFF, 0x03}, // ~+10V, 3
+	{device.ADCMidscale, 0xFF},     // 0V, 255
+	{device.ADCMidscale + 1, 0x00}, // ~0V, 0
+	{device.ADCMidscale + 2, 0x01}, // ~0V, 1
+	{0, 0x02},                      // -10V, 2
+	{0x3FFFF, 0x03},                // ~+10V, 3
 }
 
 func testHeader() capture.Header {
@@ -114,7 +115,7 @@ func expectedValues() [][]float64 {
 
 		raw18 := float64(raw[0] & 0x3FFFF)
 		cal := math.Round(raw18)
-		frame[0] = (cal - 131072.0) * 10.0 / 131072.0
+		frame[0] = (cal - device.ADCMidscale) * 10.0 / device.ADCMidscale
 
 		frame[1] = float64(raw[1])
 		vals[i] = frame
@@ -469,7 +470,7 @@ func TestSQLite_LargeBatch(t *testing.T) {
 	w, _ := capture.NewWriter(dir, h)
 	frames := make([][]uint32, numFrames)
 	for i := range numFrames {
-		frames[i] = []uint32{uint32(131072 + i), uint32(i)}
+		frames[i] = []uint32{uint32(device.ADCMidscale + i), uint32(i)}
 	}
 	w.WriteBulk(framesToBulk(frames))
 	w.Close()

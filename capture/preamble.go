@@ -9,7 +9,8 @@ import (
 	"os"
 )
 
-const maxHeaderLen = 1 << 20 // 1 MiB
+// maxHeaderLen is the maximum allowed header size (1 MiB).
+const maxHeaderLen = 1 << 20
 
 var errReservedFlags = errors.New("capture: reserved flags byte is non-zero")
 

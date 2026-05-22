@@ -15,7 +15,8 @@ var ErrNoChannels = errors.New("codec: no channels")
 type Decoder struct {
 	channels  []device.ChannelConfig
 	coeffs    []voltCoeff
-	frameSize int // bytes per frame
+	// frameSize is the number of bytes per frame.
+	frameSize int
 }
 
 // NewDecoder creates a Decoder for the given channel configuration and calibration table.
@@ -103,4 +104,3 @@ func (d *Decoder) NumFrames(chunk []byte) int {
 func (d *Decoder) MaxSamples() int {
 	return (device.MaxTransferBytes / d.frameSize) * len(d.coeffs)
 }
-

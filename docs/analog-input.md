@@ -150,12 +150,13 @@ v := cal[channel][rangeCode].ToVolts(rawValue, rangeCode)
 The conversion applies the factory calibration slope and offset, then maps the
 result to the voltage range:
 
-- Bipolar +/-10V: `(cal - 131072) * 10 / 131072`
-- Bipolar +/-5V: `(cal - 131072) * 5 / 131072`
-- Unipolar 0-10V: `cal * 10 / 262143`
-- Unipolar 0-5V: `cal * 5 / 262143`
+- Bipolar +/-10V: `(cal - ADCMidscale) * 10 / ADCMidscale`
+- Bipolar +/-5V: `(cal - ADCMidscale) * 5 / ADCMidscale`
+- Unipolar 0-10V: `cal * 10 / ADCMaxCode`
+- Unipolar 0-5V: `cal * 5 / ADCMaxCode`
 
-Unipolar values are clamped to `[0, 262143]` before conversion.
+Where `ADCMidscale` = 2^17 (131072) and `ADCMaxCode` = 2^18 - 1 (262143).
+Unipolar values are clamped to `[0, ADCMaxCode]` before conversion.
 
 ### Overrun Handling
 

@@ -68,22 +68,33 @@ type Header struct {
 	// Device identification.
 	DeviceModel     string    `json:"device_model"`
 	DeviceSerial    string    `json:"device_serial"`
-	FPGAVersion     string    `json:"fpga_version"`              // e.g. "1.2"
-	CalibrationDate time.Time `json:"calibration_date,omitzero"` // Factory calibration date from EEPROM.
+	// FPGAVersion is the FPGA firmware version string (e.g. "1.2").
+	FPGAVersion string `json:"fpga_version"`
+	// CalibrationDate is the factory calibration date from EEPROM.
+	CalibrationDate time.Time `json:"calibration_date,omitzero"`
 
 	// Capture configuration.
-	Channels   []Channel  `json:"channels"`
-	SampleRate float64    `json:"sample_rate"` // Hz per channel.
+	Channels []Channel `json:"channels"`
+	// SampleRate is the sample rate in Hz per channel.
+	SampleRate float64 `json:"sample_rate"`
 	Format     DataFormat `json:"format"`
-	FrameCount uint64     `json:"-"` // Stored in the binary preamble, not in JSON. 0 = unknown.
+	// FrameCount is stored in the binary preamble, not in JSON. 0 = unknown.
+	FrameCount uint64 `json:"-"`
 
 	// Optional session metadata.
-	ApplicationName string            `json:"application_name,omitempty"` // Name of the application that captured the data.
-	SessionID       string            `json:"session_id,omitempty"`       // Identifier for this capture session.
-	Description     string            `json:"description,omitempty"`      // Free-form description.
-	Operator        string            `json:"operator,omitempty"`         // Person or system running the capture.
-	Timestamp       int64             `json:"timestamp,omitempty"`        // Capture start as milliseconds since Unix epoch.
-	Properties      map[string]string `json:"properties,omitempty"`       // Arbitrary key-value metadata.
+
+	// ApplicationName is the name of the application that captured the data.
+	ApplicationName string `json:"application_name,omitempty"`
+	// SessionID is the identifier for this capture session.
+	SessionID string `json:"session_id,omitempty"`
+	// Description is a free-form description.
+	Description string `json:"description,omitempty"`
+	// Operator is the person or system running the capture.
+	Operator string `json:"operator,omitempty"`
+	// Timestamp is the capture start as milliseconds since Unix epoch.
+	Timestamp int64 `json:"timestamp,omitempty"`
+	// Properties holds arbitrary key-value metadata.
+	Properties map[string]string `json:"properties,omitempty"`
 }
 
 // FrameAtTime returns the frame index corresponding to the given time offset

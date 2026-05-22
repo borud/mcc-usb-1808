@@ -36,15 +36,15 @@ func TestVoltage_AllRanges(t *testing.T) {
 		want    float64
 		epsilon float64
 	}{
-		{"BP10V midscale", 131072, device.BP10V, 0.0, 0.001},
+		{"BP10V midscale", device.ADCMidscale, device.BP10V, 0.0, 0.001},
 		{"BP10V zero", 0, device.BP10V, -10.0, 0.001},
-		{"BP10V max", 262143, device.BP10V, 9.99992, 0.001},
-		{"BP5V midscale", 131072, device.BP5V, 0.0, 0.001},
+		{"BP10V max", device.ADCMaxCode, device.BP10V, 9.99992, 0.001},
+		{"BP5V midscale", device.ADCMidscale, device.BP5V, 0.0, 0.001},
 		{"BP5V zero", 0, device.BP5V, -5.0, 0.001},
 		{"UP10V zero", 0, device.UP10V, 0.0, 0.001},
-		{"UP10V max", 262143, device.UP10V, 10.0, 0.001},
+		{"UP10V max", device.ADCMaxCode, device.UP10V, 10.0, 0.001},
 		{"UP5V zero", 0, device.UP5V, 0.0, 0.001},
-		{"UP5V max", 262143, device.UP5V, 5.0, 0.001},
+		{"UP5V max", device.ADCMaxCode, device.UP5V, 5.0, 0.001},
 	}
 
 	for _, tt := range tests {
@@ -142,7 +142,7 @@ func TestDigital(t *testing.T) {
 	}
 	dec, _ := NewDecoder(channels, cal)
 
-	chunk := makeFrame(131072, 0xAB)
+	chunk := makeFrame(device.ADCMidscale, 0xAB)
 	for frame := range dec.Frames(chunk) {
 		if frame.Digital() != 0xAB {
 			t.Errorf("Digital() = 0x%02x, want 0xAB", frame.Digital())
@@ -157,7 +157,7 @@ func TestDigital_NoDIO(t *testing.T) {
 	}
 	dec, _ := NewDecoder(channels, cal)
 
-	chunk := makeFrame(131072)
+	chunk := makeFrame(device.ADCMidscale)
 	for frame := range dec.Frames(chunk) {
 		if frame.Digital() != 0 {
 			t.Errorf("Digital() with no DIO channel = %d, want 0", frame.Digital())
@@ -175,9 +175,8 @@ func TestVoltage_WithCalibration(t *testing.T) {
 	}
 	dec, _ := NewDecoder(channels, cal)
 
-	// raw=131072 with slope=1.001 offset=5 → calibrated = 131072*1.001 + 5 = 131203.072 + 5 = 131208
-	// voltage = (round(131208.072) - 131072) * 10 / 131072 = 136 * 10 / 131072 ≈ 0.01037
-	chunk := makeFrame(131072)
+	// raw=ADCMidscale with slope=1.001 offset=5 → non-zero voltage
+	chunk := makeFrame(device.ADCMidscale)
 	for frame := range dec.Frames(chunk) {
 		got := frame.Voltage(0)
 		if math.Abs(got) < 0.001 {
@@ -196,9 +195,9 @@ func TestCalibration_ToVolts(t *testing.T) {
 		want    float64
 		epsilon float64
 	}{
-		{"BP10V midscale", 131072, device.BP10V, 0.0, 0.001},
+		{"BP10V midscale", device.ADCMidscale, device.BP10V, 0.0, 0.001},
 		{"BP10V zero", 0, device.BP10V, -10.0, 0.001},
-		{"UP10V max", 262143, device.UP10V, 10.0, 0.001},
+		{"UP10V max", device.ADCMaxCode, device.UP10V, 10.0, 0.001},
 	}
 
 	for _, tt := range tests {
@@ -212,7 +211,7 @@ func TestCalibration_ToVolts(t *testing.T) {
 }
 
 func FuzzCalibrate(f *testing.F) {
-	for _, raw := range []uint32{0, 131072, 262143, 100000} {
+	for _, raw := range []uint32{0, device.ADCMidscale, device.ADCMaxCode, 100000} {
 		for r := range 4 {
 			f.Add(raw, uint8(r), float32(1.0), float32(0.0))
 		}
@@ -256,7 +255,7 @@ func BenchmarkVoltage(b *testing.B) {
 
 	chunk := make([]byte, numFrames*numCh*4)
 	for i := range numFrames * numCh {
-		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%262144))
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCMaxCode+1)))
 	}
 
 	b.ResetTimer()
@@ -278,7 +277,7 @@ func BenchmarkToVolts(b *testing.B) {
 	b.ReportAllocs()
 	var sink float64
 	for b.Loop() {
-		sink += cal.ToVolts(131072, device.BP10V)
+		sink += cal.ToVolts(device.ADCMidscale, device.BP10V)
 	}
 	_ = sink
 }
@@ -299,7 +298,7 @@ func BenchmarkDecodeVoltages(b *testing.B) {
 
 	chunk := make([]byte, numFrames*numCh*4)
 	for i := range numFrames * numCh {
-		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%262144))
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCMaxCode+1)))
 	}
 	dst := make([]float64, numFrames*numCh)
 
@@ -323,7 +322,7 @@ func BenchmarkVoltageOnly(b *testing.B) {
 	dec, _ := NewDecoder(channels, cal)
 	data := make([]byte, numCh*4)
 	for i := range numCh {
-		binary.LittleEndian.PutUint32(data[i*4:], uint32(131072+i))
+		binary.LittleEndian.PutUint32(data[i*4:], uint32(device.ADCMidscale+i))
 	}
 	f := &Frame{coeffs: dec.coeffs, channels: dec.channels, data: data}
 

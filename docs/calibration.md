@@ -44,7 +44,7 @@ The date is stored at EEPROM address 0x7110 as 6 bytes: year offset from
 
 1. Mask raw value to 18 bits.
 2. Apply: `cal = raw * slope + offset`
-3. Clamp unipolar ranges to [0, 262143].
+3. Clamp unipolar ranges to [0, ADCMaxCode].
 4. Round and convert to voltage based on range.
 
 ```go

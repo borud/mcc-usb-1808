@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 const maxWAVDataSize = math.MaxUint32 - 36
@@ -21,7 +22,7 @@ var errWAVTooLarge = errors.New("export: data exceeds WAV 4 GiB limit")
 //
 // This format is useful for visualizing signals in audio editors such
 // as Audacity. Non-analog channels (digital, counter, encoder) are
-// included as-is, scaled to [-1, +1] by dividing by 262143 (the 18-bit
+// included as-is, scaled to [-1, +1] by dividing by ADCMaxCode (the 18-bit
 // ADC full-scale value).
 //
 // WAV files have a 4 GiB size limit due to the 32-bit chunk size fields.
@@ -58,7 +59,7 @@ func WAV(w io.Writer, r *capture.Reader) error {
 	scales := make([]float64, numCh)
 	for i, ch := range h.Channels {
 		if ch.Type != capture.AnalogIn {
-			scales[i] = 262143.0
+			scales[i] = device.ADCMaxCode
 			continue
 		}
 		var maxAbs float64

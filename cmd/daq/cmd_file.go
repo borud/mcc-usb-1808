@@ -133,7 +133,6 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 	return nil
 }
 
-
 // fileExportCmd exports a capture to another format.
 type fileExportCmd struct {
 	ExportFormat string `help:"Export format (${enum})." enum:"csv,sqlite,wav,parquet" required:"" name:"to"`

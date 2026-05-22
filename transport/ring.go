@@ -58,8 +58,10 @@ type bulkRing struct {
 	bufSize   int
 	results   chan RingResult
 	h         cgo.Handle
-	stopCh    chan struct{} // closed by Stop to unblock channel sends
-	evtDone   chan struct{} // closed when event loop goroutine exits
+	// stopCh is closed by Stop to unblock channel sends.
+	stopCh chan struct{}
+	// evtDone is closed when the event loop goroutine exits.
+	evtDone chan struct{}
 	stopped   atomic.Bool
 	pending   atomic.Int32
 	submitted atomic.Uint64

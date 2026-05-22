@@ -7,10 +7,14 @@ type ChannelType uint8
 
 // ChannelType values.
 const (
-	AnalogIn  ChannelType = iota // Analog input (channels 0-7)
-	DigitalIO                    // Digital I/O port (channel 8)
-	Counter                      // Counter (channels 9-10)
-	Encoder                      // Quadrature encoder (channels 11-12)
+	// AnalogIn represents an analog input channel (channels 0-7).
+	AnalogIn ChannelType = iota
+	// DigitalIO represents the digital I/O port (channel 8).
+	DigitalIO
+	// Counter represents a counter channel (channels 9-10).
+	Counter
+	// Encoder represents a quadrature encoder channel (channels 11-12).
+	Encoder
 )
 
 // CalEntry holds calibration coefficients for a single channel at its
@@ -23,11 +27,16 @@ type CalEntry struct {
 
 // Channel describes a single channel in the capture.
 type Channel struct {
-	Index int         `json:"index"`           // Hardware channel index.
-	Type  ChannelType `json:"type"`            // Channel type.
-	Range uint8       `json:"range,omitempty"` // Voltage range code (0=BP10V, 1=BP5V, 2=UP10V, 3=UP5V). AnalogIn only.
-	Name  string      `json:"name,omitempty"`  // Optional human-readable label.
-	Cal   *CalEntry   `json:"cal,omitempty"`   // Calibration coefficients. AnalogIn + RawUint32 only.
+	// Index is the hardware channel index.
+	Index int `json:"index"`
+	// Type is the channel type.
+	Type ChannelType `json:"type"`
+	// Range is the voltage range code (0=BP10V, 1=BP5V, 2=UP10V, 3=UP5V). AnalogIn only.
+	Range uint8 `json:"range,omitempty"`
+	// Name is an optional human-readable label.
+	Name string `json:"name,omitempty"`
+	// Cal holds calibration coefficients. AnalogIn + RawUint32 only.
+	Cal *CalEntry `json:"cal,omitempty"`
 }
 
 // ChannelTypeFromDevice converts a device.ChannelType to a capture.ChannelType.

@@ -6,9 +6,8 @@ import (
 	"path/filepath"
 )
 
-const (
-	defaultSegmentSize = 100 * 1024 * 1024 // 100 MB
-)
+// defaultSegmentSize is the default segment file size (100 MB).
+const defaultSegmentSize = 100 * 1024 * 1024
 
 // WriterOption configures a [Writer].
 type WriterOption func(*writerConfig)

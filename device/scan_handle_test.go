@@ -159,8 +159,8 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 	)
 
 	frameData := make([]byte, frameSize)
-	copy(frameData[0:4], wire.PutUint32LE(131072))
-	copy(frameData[4:8], wire.PutUint32LE(262143))
+	copy(frameData[0:4], wire.PutUint32LE(ADCMidscale))
+	copy(frameData[4:8], wire.PutUint32LE(ADCMaxCode))
 
 	mt := &mockRingTransport{
 		results: []transport.RingResult{
@@ -216,8 +216,8 @@ func TestScanHandle_FiniteScanCompletesViaRing(t *testing.T) {
 	// Build frame data for exactly `count` frames.
 	allFrames := make([]byte, count*frameSize)
 	for i := range count {
-		copy(allFrames[i*frameSize:], wire.PutUint32LE(131072))
-		copy(allFrames[i*frameSize+4:], wire.PutUint32LE(131072))
+		copy(allFrames[i*frameSize:], wire.PutUint32LE(ADCMidscale))
+		copy(allFrames[i*frameSize+4:], wire.PutUint32LE(ADCMidscale))
 	}
 
 	mt := &mockRingTransport{

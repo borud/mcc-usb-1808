@@ -32,23 +32,23 @@ func makeCoeffs(channels []device.ChannelConfig, cal device.CalibrationTable) []
 
 		switch ch.Range {
 		case device.BP10V:
-			vc.scale = slope * 10.0 / 131072.0
-			vc.offset = (off - 131072.0) * 10.0 / 131072.0
+			vc.scale = slope * 10.0 / device.ADCMidscale
+			vc.offset = (off - device.ADCMidscale) * 10.0 / device.ADCMidscale
 			vc.clampLo = -math.MaxFloat64
 			vc.clampHi = math.MaxFloat64
 		case device.BP5V:
-			vc.scale = slope * 5.0 / 131072.0
-			vc.offset = (off - 131072.0) * 5.0 / 131072.0
+			vc.scale = slope * 5.0 / device.ADCMidscale
+			vc.offset = (off - device.ADCMidscale) * 5.0 / device.ADCMidscale
 			vc.clampLo = -math.MaxFloat64
 			vc.clampHi = math.MaxFloat64
 		case device.UP10V:
-			vc.scale = slope * 10.0 / 262143.0
-			vc.offset = off * 10.0 / 262143.0
+			vc.scale = slope * 10.0 / device.ADCMaxCode
+			vc.offset = off * 10.0 / device.ADCMaxCode
 			vc.clampLo = 0
 			vc.clampHi = 10
 		case device.UP5V:
-			vc.scale = slope * 5.0 / 262143.0
-			vc.offset = off * 5.0 / 262143.0
+			vc.scale = slope * 5.0 / device.ADCMaxCode
+			vc.offset = off * 5.0 / device.ADCMaxCode
 			vc.clampLo = 0
 			vc.clampHi = 5
 		}

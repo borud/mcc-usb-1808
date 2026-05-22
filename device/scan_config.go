@@ -4,10 +4,14 @@ import "fmt"
 
 // ScanConfig holds configuration for an analog input scan.
 type ScanConfig struct {
-	Channels []ChannelConfig // Scan queue entries.
-	Rate     int             // Sample rate in Hz per channel.
-	Count    uint32          // Total number of scans (0 = continuous).
-	Options  uint8           // Scan option flags.
+	// Channels lists the scan queue entries.
+	Channels []ChannelConfig
+	// Rate is the sample rate in Hz per channel.
+	Rate int
+	// Count is the total number of scans (0 = continuous).
+	Count uint32
+	// Options holds scan option flags.
+	Options uint8
 }
 
 // ScanOption configures optional parameters for CreateScan.

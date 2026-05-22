@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 func testHeaderRaw(channels int) Header {
@@ -704,7 +706,7 @@ func TestSegmentFilter_InvalidSegment(t *testing.T) {
 func TestCalibrate_BP10V(t *testing.T) {
 	ch := Channel{Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
 
-	got := calibrate(131072, ch)
+	got := calibrate(device.ADCMidscale, ch)
 	if got != 0.0 {
 		t.Errorf("midpoint: got %f, want 0.0", got)
 	}
@@ -714,8 +716,8 @@ func TestCalibrate_BP10V(t *testing.T) {
 		t.Errorf("zero: got %f, want -10.0", got)
 	}
 
-	got = calibrate(0x3FFFF, ch)
-	want := (262143.0 - 131072.0) * 10.0 / 131072.0
+	got = calibrate(device.ADCMaxCode, ch)
+	want := (float64(device.ADCMaxCode) - device.ADCMidscale) * 10.0 / device.ADCMidscale
 	if math.Abs(got-want) > 1e-6 {
 		t.Errorf("max: got %f, want %f", got, want)
 	}
@@ -724,7 +726,7 @@ func TestCalibrate_BP10V(t *testing.T) {
 func TestCalibrate_BP5V(t *testing.T) {
 	ch := Channel{Type: AnalogIn, Range: 1, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
 
-	got := calibrate(131072, ch)
+	got := calibrate(device.ADCMidscale, ch)
 	if got != 0.0 {
 		t.Errorf("midpoint: got %f, want 0.0", got)
 	}
@@ -761,10 +763,10 @@ func TestCalibrate_UP5V(t *testing.T) {
 func TestCalibrate_WithSlopeOffset(t *testing.T) {
 	ch := Channel{Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0005, Offset: 10.0}}
 
-	raw := uint32(131072)
+	raw := uint32(device.ADCMidscale)
 	cal := float64(raw)*float64(ch.Cal.Slope) + float64(ch.Cal.Offset)
 	cal = math.Round(cal)
-	want := (cal - 131072.0) * 10.0 / 131072.0
+	want := (cal - device.ADCMidscale) * 10.0 / device.ADCMidscale
 
 	got := calibrate(raw, ch)
 	if math.Abs(got-want) > 1e-9 {
@@ -801,7 +803,7 @@ func TestCalibrate_UnipolarClamp(t *testing.T) {
 
 func TestFrame_Values_RawWithCalibration(t *testing.T) {
 	h := testHeaderMixed()
-	frame := []uint32{131072, 131072, 0xFF, 1000, 500}
+	frame := []uint32{device.ADCMidscale, device.ADCMidscale, 0xFF, 1000, 500}
 	dir := testCapture(t, h, [][]uint32{frame})
 
 	r, err := NewReader(dir)
@@ -1201,7 +1203,7 @@ func FuzzCaptureRaw(f *testing.F) {
 			for j, idx := range queue {
 				switch {
 				case idx < 8:
-					vals[j] = uint32(131072+i*13+j*7) & 0x3FFFF
+					vals[j] = uint32(device.ADCMidscale+i*13+j*7) & 0x3FFFF
 				case idx == 8:
 					vals[j] = uint32(i) & 0xFF
 				default:
@@ -1267,7 +1269,7 @@ func FuzzCaptureRaw(f *testing.F) {
 
 func FuzzCalibrate(f *testing.F) {
 	for _, rng := range []uint8{0, 1, 2, 3} {
-		for _, raw := range []uint32{0, 1, 131072, 262143} {
+		for _, raw := range []uint32{0, 1, device.ADCMidscale, device.ADCMaxCode} {
 			f.Add(raw, rng, float32(1.0), float32(0.0))
 			f.Add(raw, rng, float32(1.001), float32(5.0))
 		}
@@ -1381,7 +1383,7 @@ func benchData(numCh, numFrames int) [][]uint32 {
 	for i := range numFrames {
 		vals := make([]uint32, numCh)
 		for ch := range numCh {
-			vals[ch] = uint32(131072 + (i*13+ch*7)%1000)
+			vals[ch] = uint32(device.ADCMidscale + (i*13+ch*7)%1000)
 		}
 		data[i] = vals
 	}
