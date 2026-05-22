@@ -54,7 +54,7 @@ func (f *Fanout) Run() {
 			// Get a buffer from the subscription's pool or allocate.
 			var buf []byte
 			if pooled := sub.pool.Get(); pooled != nil {
-				buf = pooled.([]byte)
+				buf = *pooled.(*[]byte)
 				if cap(buf) >= len(chunk.Data) {
 					buf = buf[:len(chunk.Data)]
 				} else {
@@ -73,7 +73,7 @@ func (f *Fanout) Run() {
 			select {
 			case sub.ch <- cp:
 			default:
-				sub.pool.Put(buf) //nolint:staticcheck
+				sub.pool.Put(&buf)
 				sub.dropped.Add(1)
 			}
 		}

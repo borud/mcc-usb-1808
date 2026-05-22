@@ -86,7 +86,7 @@ func (c *captureCmd) Run(app *cli) error {
 	}
 
 	// Build capture header.
-	header, err := c.buildHeader(dev, channels)
+	header, err := c.buildHeader(dev, cfg)
 	if err != nil {
 		return fmt.Errorf("build header: %w", err)
 	}
@@ -173,60 +173,15 @@ func (c *captureCmd) Run(app *cli) error {
 	return nil
 }
 
-func (c *captureCmd) buildHeader(dev *device.Device, channels []device.ChannelConfig) (capture.Header, error) {
-	serial, err := dev.SerialNumber()
+func (c *captureCmd) buildHeader(dev *device.Device, cfg device.ScanConfig) (capture.Header, error) {
+	h, err := capture.NewHeader(dev, cfg)
 	if err != nil {
-		return capture.Header{}, fmt.Errorf("serial: %w", err)
+		return capture.Header{}, err
 	}
 
-	major, minor, err := dev.FPGAVersion()
-	if err != nil {
-		return capture.Header{}, fmt.Errorf("fpga version: %w", err)
-	}
-
-	calDate, _ := dev.CalibrationDate()
-	calTable := dev.CalibrationTable()
-
-	rate, _ := parseHumanInt(c.Rate)
-
-	chDescs := make([]capture.Channel, len(channels))
-	for i, ch := range channels {
-		cc := capture.Channel{
-			Index: ch.Index,
-			Type:  capture.ChannelTypeFromDevice(ch.Type),
-			Name:  scanChanNames[ch.Index],
-		}
-		if ch.Type == device.ChannelTypeAnalog {
-			cc.Range = uint8(ch.Range)
-			cal := calTable[ch.Index][ch.Range]
-			cc.Cal = &capture.CalEntry{
-				Slope:  cal.Slope,
-				Offset: cal.Offset,
-			}
-		}
-		chDescs[i] = cc
-	}
-
-	h := capture.Header{
-		DeviceModel:     dev.Model().String(),
-		DeviceSerial:    serial,
-		FPGAVersion:     fmt.Sprintf("%d.%d", major, minor),
-		CalibrationDate: calDate,
-		Channels:        chDescs,
-		SampleRate:      float64(rate),
-		Format:          capture.RawUint32,
-		Timestamp:       time.Now().UnixMilli(),
-	}
-
-	if c.Description != "" {
-		h.Description = c.Description
-	}
-	if c.Operator != "" {
-		h.Operator = c.Operator
-	}
-	if c.SessionID != "" {
-		h.SessionID = c.SessionID
-	}
+	h.Description = c.Description
+	h.Operator = c.Operator
+	h.SessionID = c.SessionID
 
 	return h, nil
 }

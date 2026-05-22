@@ -39,11 +39,11 @@ func (h *hangingTransport) ControlOut(request uint8, _, _ uint16, _ []byte) erro
 	return nil
 }
 
-func (h *hangingTransport) ControlIn(_ uint8, _, _ uint16, length int) ([]byte, error) {
-	return make([]byte, length), nil
+func (h *hangingTransport) ControlIn(_ uint8, _, _ uint16, n int) ([]byte, error) {
+	return make([]byte, n), nil
 }
 
-func (h *hangingTransport) BulkRead(_ uint8, length int, _ time.Duration) ([]byte, error) {
+func (h *hangingTransport) BulkRead(_ uint8, _ int, _ time.Duration) ([]byte, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -211,6 +211,7 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 	// Channel should close when count is reached or we stop.
 	// Drain remaining.
 	for range h.Chunks() {
+		_ = true // drain
 	}
 
 	if h.Err() != nil {

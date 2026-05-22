@@ -16,6 +16,7 @@ type WriterOption func(*writerConfig)
 type writerConfig struct {
 	bufferFrames int
 	segmentSize  int
+	overwrite    bool
 }
 
 // WithBufferSize sets the number of frames to buffer before flushing to the
@@ -25,6 +26,15 @@ func WithBufferSize(frames int) WriterOption {
 		if frames > 0 {
 			c.bufferFrames = frames
 		}
+	}
+}
+
+// WithOverwrite allows [NewWriter] to reuse an existing directory,
+// removing its contents before writing. Without this option, NewWriter
+// returns [ErrDirectoryExists] if the directory already exists.
+func WithOverwrite() WriterOption {
+	return func(c *writerConfig) {
+		c.overwrite = true
 	}
 }
 
@@ -73,12 +83,6 @@ type Writer struct {
 // Returns [ErrNoChannels] if h.Channels is empty.
 // Returns [ErrInvalidFormat] if h.Format is not [RawUint32].
 func NewWriter(dir string, h Header, opts ...WriterOption) (*Writer, error) {
-	if len(h.Channels) == 0 {
-		return nil, ErrNoChannels
-	}
-	if h.Format != RawUint32 {
-		return nil, ErrInvalidFormat
-	}
 
 	cfg := writerConfig{
 		bufferFrames: defaultBufferFrames,
@@ -86,6 +90,25 @@ func NewWriter(dir string, h Header, opts ...WriterOption) (*Writer, error) {
 	}
 	for _, o := range opts {
 		o(&cfg)
+	}
+
+	// if we have explicitly turned overwrite on we remove the existing directory
+	// before stating capture so we don't get a horrible sallad of old and new files.
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		if !cfg.overwrite {
+			return nil, fmt.Errorf("%w: [%s]", ErrDirectoryExists, dir)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return nil, fmt.Errorf("remove existing directory: %w", err)
+		}
+	}
+
+	if len(h.Channels) == 0 {
+		return nil, ErrNoChannels
+	}
+
+	if h.Format != RawUint32 {
+		return nil, ErrInvalidFormat
 	}
 
 	const sampleBytes = 4

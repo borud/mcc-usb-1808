@@ -112,7 +112,7 @@ func testCapture(t *testing.T, h Header, frames [][]uint32, opts ...WriterOption
 
 func TestNewWriter_NoChannels(t *testing.T) {
 	h := Header{Format: RawUint32}
-	_, err := NewWriter(t.TempDir(), h)
+	_, err := NewWriter(filepath.Join(t.TempDir(), "capture"), h)
 	if !errors.Is(err, ErrNoChannels) {
 		t.Fatalf("expected ErrNoChannels, got %v", err)
 	}
@@ -121,14 +121,14 @@ func TestNewWriter_NoChannels(t *testing.T) {
 func TestNewWriter_InvalidFormat(t *testing.T) {
 	h := testHeaderRaw(2)
 	h.Format = DataFormat(99)
-	_, err := NewWriter(t.TempDir(), h)
+	_, err := NewWriter(filepath.Join(t.TempDir(), "capture"), h)
 	if !errors.Is(err, ErrInvalidFormat) {
 		t.Fatalf("expected ErrInvalidFormat, got %v", err)
 	}
 }
 
 func TestWriteBulk_AfterClose(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "capture")
 	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestWriteBulk_AfterClose(t *testing.T) {
 }
 
 func TestFlush_AfterClose(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "capture")
 	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestFlush_AfterClose(t *testing.T) {
 }
 
 func TestClose_DoubleClose(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "capture")
 	w, err := NewWriter(dir, testHeaderRaw(2))
 	if err != nil {
 		t.Fatal(err)
@@ -1398,7 +1398,7 @@ func BenchmarkWriteRaw(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		dir := b.TempDir()
+		dir := filepath.Join(b.TempDir(), "capture")
 		w, _ := NewWriter(dir, h)
 		w.WriteBulk(bulk)
 		w.Close()
@@ -1411,7 +1411,7 @@ func BenchmarkReadRaw(b *testing.B) {
 	data := benchData(numCh, numFrames)
 	h := testHeaderRaw(numCh)
 
-	dir := b.TempDir()
+	dir := filepath.Join(b.TempDir(), "capture")
 	w, _ := NewWriter(dir, h)
 	w.WriteBulk(framesToBulk(data))
 	w.Close()

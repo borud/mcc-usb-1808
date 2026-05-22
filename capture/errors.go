@@ -44,4 +44,8 @@ var (
 	// ErrFrameAlignment is returned by [Writer.WriteBulk] when the data
 	// length is not a multiple of the frame size.
 	ErrFrameAlignment = errors.New("capture: data length is not a multiple of frame size")
+
+	// ErrDirectoryExists is returned by [NewWriter] when the output
+	// directory already exists and [WithOverwrite] was not specified.
+	ErrDirectoryExists = errors.New("capture: directory already exists")
 )

@@ -18,14 +18,6 @@ var queueNames = map[string]int{
 	"encoder0": 11, "encoder1": 12,
 }
 
-var scanChanNames = map[int]string{
-	0: "ain0", 1: "ain1", 2: "ain2", 3: "ain3",
-	4: "ain4", 5: "ain5", 6: "ain6", 7: "ain7",
-	8: "dio",
-	9: "counter0", 10: "counter1",
-	11: "encoder0", 12: "encoder1",
-}
-
 var rangeNames = map[string]device.Range{
 	"bp10v": device.BP10V,
 	"bp5v":  device.BP5V,

@@ -34,7 +34,7 @@ func (s *Subscription) Chunks() <-chan device.Chunk {
 // Call this after you are done processing a chunk.
 func (s *Subscription) Release(buf []byte) {
 	if buf != nil {
-		s.pool.Put(buf) //nolint:staticcheck
+		s.pool.Put(&buf)
 	}
 }
 

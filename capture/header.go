@@ -1,8 +1,67 @@
 package capture
 
 import (
+	"fmt"
 	"time"
+
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
+
+// scanChanNames maps hardware channel indices to human-readable names.
+var scanChanNames = map[int]string{
+	0: "ain0", 1: "ain1", 2: "ain2", 3: "ain3",
+	4: "ain4", 5: "ain5", 6: "ain6", 7: "ain7",
+	8: "dio",
+	9: "counter0", 10: "counter1",
+	11: "encoder0", 12: "encoder1",
+}
+
+// NewHeader builds a capture Header from a device and scan configuration.
+// It queries the device for serial number, FPGA version, calibration date,
+// and calibration coefficients. Timestamp is set to the current time.
+func NewHeader(dev *device.Device, cfg device.ScanConfig) (Header, error) {
+	serial, err := dev.SerialNumber()
+	if err != nil {
+		return Header{}, fmt.Errorf("serial: %w", err)
+	}
+
+	major, minor, err := dev.FPGAVersion()
+	if err != nil {
+		return Header{}, fmt.Errorf("fpga version: %w", err)
+	}
+
+	calDate, _ := dev.CalibrationDate()
+	calTable := dev.CalibrationTable()
+
+	channels := make([]Channel, len(cfg.Channels))
+	for i, ch := range cfg.Channels {
+		cc := Channel{
+			Index: ch.Index,
+			Type:  ChannelTypeFromDevice(ch.Type),
+			Name:  scanChanNames[ch.Index],
+		}
+		if ch.Type == device.ChannelTypeAnalog {
+			cc.Range = uint8(ch.Range)
+			cal := calTable[ch.Index][ch.Range]
+			cc.Cal = &CalEntry{
+				Slope:  cal.Slope,
+				Offset: cal.Offset,
+			}
+		}
+		channels[i] = cc
+	}
+
+	return Header{
+		DeviceModel:     dev.Model().String(),
+		DeviceSerial:    serial,
+		FPGAVersion:     fmt.Sprintf("%d.%d", major, minor),
+		CalibrationDate: calDate,
+		Channels:        channels,
+		SampleRate:      float64(cfg.Rate),
+		Format:          RawUint32,
+		Timestamp:       time.Now().UnixMilli(),
+	}, nil
+}
 
 // Header is the capture file metadata, written once at the start of the file.
 type Header struct {

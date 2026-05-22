@@ -102,7 +102,8 @@ func TestSlowSubscriberDrops(t *testing.T) {
 	}
 	close(src)
 
-	for range sub.Chunks() {
+	for c := range sub.Chunks() {
+		sub.Release(c.Data)
 	}
 
 	if sub.Dropped() == 0 {
@@ -122,7 +123,8 @@ func TestErrPropagation(t *testing.T) {
 	close(src)
 	f.Run()
 
-	for range sub.Chunks() {
+	for c := range sub.Chunks() {
+		sub.Release(c.Data)
 	}
 
 	if !errors.Is(sub.Err(), testErr) {

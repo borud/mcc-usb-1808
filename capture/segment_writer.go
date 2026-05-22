@@ -39,7 +39,7 @@ func newSegmentWriter(pendingPath, finalPath string, h Header, seq uint16, globa
 		return nil, err
 	}
 
-	f, err := os.OpenFile(pendingPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) // #nosec G304 -- path constructed internally from segment sequence number
+	f, err := os.OpenFile(pendingPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- path constructed internally from segment sequence number
 	if err != nil {
 		return nil, err
 	}
