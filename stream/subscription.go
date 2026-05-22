@@ -3,11 +3,13 @@ package stream
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 // Subscription receives copies of chunks broadcast by a Fanout.
 type Subscription struct {
-	ch      chan []byte
+	ch      chan device.Chunk
 	pool    sync.Pool
 	dropped atomic.Uint64
 	err     error
@@ -16,7 +18,7 @@ type Subscription struct {
 
 func newSubscription(depth int) *Subscription {
 	return &Subscription{
-		ch: make(chan []byte, depth),
+		ch: make(chan device.Chunk, depth),
 		pool: sync.Pool{
 			New: func() any { return nil },
 		},
@@ -24,7 +26,7 @@ func newSubscription(depth int) *Subscription {
 }
 
 // Chunks returns the channel delivering chunk copies.
-func (s *Subscription) Chunks() <-chan []byte {
+func (s *Subscription) Chunks() <-chan device.Chunk {
 	return s.ch
 }
 

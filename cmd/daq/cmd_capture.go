@@ -145,15 +145,15 @@ func (c *captureCmd) Run(app *cli) error {
 		}
 	}()
 
-	for data := range handle.Chunks() {
+	for chunk := range handle.Chunks() {
 		var buf []byte
 		select {
 		case buf = <-writePool:
 		default:
-			buf = make([]byte, len(data))
+			buf = make([]byte, len(chunk.Data))
 		}
-		buf = buf[:len(data)]
-		copy(buf, data)
+		buf = buf[:len(chunk.Data)]
+		copy(buf, chunk.Data)
 		writeCh <- buf
 	}
 	close(writeCh)

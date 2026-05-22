@@ -36,10 +36,14 @@ type Range uint8
 
 // Analog input voltage ranges.
 const (
-	BP10V Range = 0 // +/- 10V bipolar
-	BP5V  Range = 1 // +/- 5V bipolar
-	UP10V Range = 2 // 0-10V unipolar
-	UP5V  Range = 3 // 0-5V unipolar
+	// +/- 10V bipolar
+	BP10V Range = 0
+	// +/- 5V bipolar
+	BP5V Range = 1
+	// 0-10V unipolar
+	UP10V Range = 2
+	// 0-5V unipolar
+	UP5V Range = 3
 )
 
 func (r Range) String() string {

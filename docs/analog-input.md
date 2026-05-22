@@ -50,6 +50,14 @@ I/O, counters, and encoders.
 to begin acquisition, read from `Chunks()`, and `Stop` to end.
 
 ```go
+import "github.com/borud/mcc-usb-1808/v4/device"
+
+dev, err := device.Open()
+if err != nil {
+    log.Fatal(err)
+}
+defer dev.Close()
+
 cfg := device.ScanConfig{
     Channels: []device.ChannelConfig{
         {Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
@@ -64,14 +72,16 @@ h, err := dev.CreateScan(cfg)
 if err != nil {
     log.Fatal(err)
 }
+defer h.Stop()
+
 if err := h.Start(); err != nil {
     log.Fatal(err)
 }
 for chunk := range h.Chunks() {
-    // chunk is []byte, packed little-endian uint32s
-    // len(chunk) is a multiple of frameSize (nChannels * 4)
+    // chunk.Data is []byte, packed little-endian uint32s
+    // chunk.FrameStart is the index of the first frame in this chunk
+    // chunk.FrameCount is the number of frames in chunk.Data
 }
-h.Stop()
 ```
 
 ### ScanConfig
@@ -121,7 +131,7 @@ if err != nil {
     log.Fatal(err)
 }
 for chunk := range h.Chunks() {
-    for frame := range dec.Frames(chunk) {
+    for frame := range dec.Frames(chunk.Data) {
         voltage := frame.Voltage(0)  // calibrated voltage for channel 0
         dio := frame.Digital()       // digital I/O byte
     }

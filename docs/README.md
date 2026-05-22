@@ -53,9 +53,9 @@ Most applications use three packages:
 - **`codec`** -- decode raw scan chunks into typed `Frame` values with
   calibrated voltages, digital I/O, counter, and encoder readings.
 - **`capture`** -- record raw scan data to disk and replay it later. The writer
-  accepts raw bytes directly from `ScanHandle.Chunks()` for a zero-copy fast
-  path. The reader produces `Frame` values with calibrated voltages, just like
-  `codec`.
+  accepts raw bytes directly from `ScanHandle.Chunks()` (via `Chunk.Data`) for
+  a fast path. The reader produces `Frame` values with calibrated voltages,
+  just like `codec`.
 
 For multi-consumer pipelines (e.g. simultaneous recording and live display),
 the **`stream`** package provides a `Fanout` that copies each chunk to multiple

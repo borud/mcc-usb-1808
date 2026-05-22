@@ -5,26 +5,32 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
+func chunk(data ...byte) device.Chunk {
+	return device.Chunk{Data: data}
+}
+
 func TestSingleSubscriber(t *testing.T) {
-	src := make(chan []byte, 3)
+	src := make(chan device.Chunk, 3)
 	f := NewFanout(src)
 	sub := f.Subscribe(WithDepth(8))
 
-	src <- []byte{1, 2, 3}
-	src <- []byte{4, 5, 6}
-	src <- []byte{7, 8, 9}
+	src <- chunk(1, 2, 3)
+	src <- chunk(4, 5, 6)
+	src <- chunk(7, 8, 9)
 	close(src)
 
 	go f.Run()
 
 	var got [][]byte
-	for chunk := range sub.Chunks() {
-		cp := make([]byte, len(chunk))
-		copy(cp, chunk)
+	for c := range sub.Chunks() {
+		cp := make([]byte, len(c.Data))
+		copy(cp, c.Data)
 		got = append(got, cp)
-		sub.Release(chunk)
+		sub.Release(c.Data)
 	}
 
 	if len(got) != 3 {
@@ -42,13 +48,13 @@ func TestSingleSubscriber(t *testing.T) {
 }
 
 func TestTwoSubscribers(t *testing.T) {
-	src := make(chan []byte, 3)
+	src := make(chan device.Chunk, 3)
 	f := NewFanout(src)
 	sub1 := f.Subscribe(WithDepth(8))
 	sub2 := f.Subscribe(WithDepth(8))
 
-	src <- []byte{10, 20}
-	src <- []byte{30, 40}
+	src <- chunk(10, 20)
+	src <- chunk(30, 40)
 	close(src)
 
 	go f.Run()
@@ -58,20 +64,20 @@ func TestTwoSubscribers(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for chunk := range sub1.Chunks() {
-			cp := make([]byte, len(chunk))
-			copy(cp, chunk)
+		for c := range sub1.Chunks() {
+			cp := make([]byte, len(c.Data))
+			copy(cp, c.Data)
 			got1 = append(got1, cp)
-			sub1.Release(chunk)
+			sub1.Release(c.Data)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for chunk := range sub2.Chunks() {
-			cp := make([]byte, len(chunk))
-			copy(cp, chunk)
+		for c := range sub2.Chunks() {
+			cp := make([]byte, len(c.Data))
+			copy(cp, c.Data)
 			got2 = append(got2, cp)
-			sub2.Release(chunk)
+			sub2.Release(c.Data)
 		}
 	}()
 	wg.Wait()
@@ -79,27 +85,23 @@ func TestTwoSubscribers(t *testing.T) {
 	if len(got1) != 2 || len(got2) != 2 {
 		t.Fatalf("sub1=%d sub2=%d, want 2 each", len(got1), len(got2))
 	}
-	// Each subscriber gets independent copies.
 	if !bytes.Equal(got1[0], got2[0]) {
 		t.Errorf("sub1[0]=%v != sub2[0]=%v", got1[0], got2[0])
 	}
 }
 
 func TestSlowSubscriberDrops(t *testing.T) {
-	src := make(chan []byte)
+	src := make(chan device.Chunk)
 	f := NewFanout(src)
-	// Depth=1 means only 1 chunk can be buffered.
 	sub := f.Subscribe(WithDepth(1))
 
 	go f.Run()
 
-	// Send enough to fill the buffer and cause drops.
 	for i := range 10 {
-		src <- []byte{byte(i)}
+		src <- chunk(byte(i))
 	}
 	close(src)
 
-	// Drain.
 	for range sub.Chunks() {
 	}
 
@@ -109,18 +111,17 @@ func TestSlowSubscriberDrops(t *testing.T) {
 }
 
 func TestErrPropagation(t *testing.T) {
-	src := make(chan []byte, 1)
+	src := make(chan device.Chunk, 1)
 	f := NewFanout(src)
 	sub := f.Subscribe(WithDepth(4))
 
 	testErr := errors.New("upstream failure")
 	f.SetErr(testErr)
 
-	src <- []byte{1}
+	src <- chunk(1)
 	close(src)
 	f.Run()
 
-	// Drain.
 	for range sub.Chunks() {
 	}
 
@@ -130,7 +131,7 @@ func TestErrPropagation(t *testing.T) {
 }
 
 func TestSourceClosePropagatesToSubscribers(t *testing.T) {
-	src := make(chan []byte)
+	src := make(chan device.Chunk)
 	f := NewFanout(src)
 	sub1 := f.Subscribe(WithDepth(4))
 	sub2 := f.Subscribe(WithDepth(4))
@@ -138,7 +139,6 @@ func TestSourceClosePropagatesToSubscribers(t *testing.T) {
 	go f.Run()
 	close(src)
 
-	// Both subscribers' channels should close.
 	_, ok1 := <-sub1.Chunks()
 	_, ok2 := <-sub2.Chunks()
 	if ok1 || ok2 {

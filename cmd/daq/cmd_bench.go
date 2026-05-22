@@ -127,15 +127,15 @@ func (b *benchCmd) Run(app *cli) error {
 	var maxGap time.Duration
 	lastRead := start
 
-	for data := range handle.Chunks() {
+	for chunk := range handle.Chunks() {
 		var buf []byte
 		select {
 		case buf = <-writePool:
 		default:
-			buf = make([]byte, len(data))
+			buf = make([]byte, len(chunk.Data))
 		}
-		buf = buf[:len(data)]
-		copy(buf, data)
+		buf = buf[:len(chunk.Data)]
+		copy(buf, chunk.Data)
 		writeCh <- buf
 
 		now := time.Now()
@@ -145,7 +145,7 @@ func (b *benchCmd) Run(app *cli) error {
 		}
 		lastRead = now
 		reads++
-		totalBytes += int64(len(data))
+		totalBytes += int64(len(chunk.Data))
 	}
 	close(writeCh)
 	wg.Wait()

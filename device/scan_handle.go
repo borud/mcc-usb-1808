@@ -19,8 +19,15 @@ const (
 	scanStopped
 )
 
+// Chunk is a batch of scan frames delivered by [ScanHandle.Chunks].
+type Chunk struct {
+	Data       []byte // Raw frame data (packed little-endian uint32s).
+	FrameStart int    // Index of the first frame in this chunk.
+	FrameCount int    // Number of complete frames in Data.
+}
+
 // ScanHandle represents a configured scan that can be started and stopped.
-// Data is delivered via the Chunks channel as raw byte slices.
+// Data is delivered via the Chunks channel as [Chunk] values.
 type ScanHandle struct {
 	dev      *Device
 	channels []ChannelConfig
@@ -30,7 +37,7 @@ type ScanHandle struct {
 	opts     scanOptions
 
 	frameSize  int // bytes per frame (nChannels * 4)
-	chunks     chan []byte
+	chunks     chan Chunk
 	stop       chan struct{}
 	done       chan struct{}
 	err        error
@@ -91,16 +98,17 @@ func (d *Device) CreateScan(cfg ScanConfig, opts ...ScanOption) (*ScanHandle, er
 		options:   cfg.Options,
 		opts:      o,
 		frameSize: nCh * 4,
-		chunks:    make(chan []byte, o.pipelineDepth),
+		chunks:    make(chan Chunk, o.pipelineDepth),
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 	}
 	return h, nil
 }
 
-// Chunks returns the channel delivering raw scan data.
-// Each slice contains one or more complete frames.
-func (h *ScanHandle) Chunks() <-chan []byte {
+// Chunks returns the channel delivering scan data.
+// Each [Chunk] contains one or more complete frames along with the
+// frame offset, which allows consumers to detect gaps from dropped chunks.
+func (h *ScanHandle) Chunks() <-chan Chunk {
 	return h.chunks
 }
 
@@ -222,6 +230,16 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 	defer close(h.done)
 	defer close(h.chunks)
 	defer func() {
+		// Signal all reader goroutines and flush pending USB reads so
+		// they can unwind.  Safe to call even if Stop() already ran
+		// (stopOnce prevents double-close, redundant commands are harmless).
+		h.stopOnce.Do(func() { close(h.stop) })
+		h.dev.mu.Lock()
+		_ = h.dev.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
+		_ = h.dev.transport.ControlOut(cmdAInBulkFlush, 0, 0, nil)
+		h.dev.mu.Unlock()
+	}()
+	defer func() {
 		if n := h.poolMisses.Load(); n > 0 {
 			h.dev.log.Warn("buffer pool exhausted during scan", "misses", n)
 		}
@@ -301,6 +319,22 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 		close(ch)
 	}()
 
+	// For finite scans, start a watchdog that aborts stuck readers if
+	// the scan doesn't complete within the expected time plus a grace
+	// period.  On macOS, BulkReadInto can block past its timeout after
+	// the device finishes sending; the BulkFlush unblocks it.
+	if h.count > 0 {
+		expected := time.Duration(float64(h.count) / float64(h.rate) * float64(time.Second))
+		watchdog := time.AfterFunc(expected+2*readTimeout, func() {
+			h.stopOnce.Do(func() { close(h.stop) })
+			h.dev.mu.Lock()
+			_ = h.dev.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
+			_ = h.dev.transport.ControlOut(cmdAInBulkFlush, 0, 0, nil)
+			h.dev.mu.Unlock()
+		})
+		defer watchdog.Stop()
+	}
+
 	total := h.count
 	var framesRead uint32
 
@@ -321,9 +355,14 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 			}
 		}
 
-		if len(data) > 0 {
+		nFrames := len(data) / h.frameSize
+		if nFrames > 0 {
 			select {
-			case h.chunks <- data:
+			case h.chunks <- Chunk{
+				Data:       data,
+				FrameStart: int(framesRead),
+				FrameCount: nFrames,
+			}:
 			case <-h.stop:
 				free <- result.buf
 				return
@@ -332,7 +371,7 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 			free <- result.buf
 		}
 
-		framesRead += uint32(len(data) / h.frameSize)
+		framesRead += uint32(nFrames)
 		if total > 0 && framesRead >= total {
 			return
 		}
@@ -378,6 +417,9 @@ func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
 	defer close(h.done)
 	defer close(h.chunks)
 	defer ring.Stop()
+	defer func() {
+		h.stopOnce.Do(func() { close(h.stop) })
+	}()
 
 	total := h.count
 	var framesRead uint32
@@ -390,6 +432,15 @@ func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
 		h.dev.mu.Unlock()
 		ring.Stop()
 	}()
+
+	// Watchdog for finite scans (same rationale as runSyncReaders).
+	if h.count > 0 {
+		expected := time.Duration(float64(h.count) / float64(h.rate) * float64(time.Second))
+		watchdog := time.AfterFunc(expected+5*time.Second, func() {
+			h.stopOnce.Do(func() { close(h.stop) })
+		})
+		defer watchdog.Stop()
+	}
 
 	for result := range ring.Results() {
 		if result.Err != nil {
@@ -416,15 +467,20 @@ func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
 			}
 		}
 
-		if len(data) > 0 {
+		nFrames := len(data) / h.frameSize
+		if nFrames > 0 {
 			select {
-			case h.chunks <- data:
+			case h.chunks <- Chunk{
+				Data:       data,
+				FrameStart: int(framesRead),
+				FrameCount: nFrames,
+			}:
 			case <-h.stop:
 				return
 			}
 		}
 
-		framesRead += uint32(len(data) / h.frameSize)
+		framesRead += uint32(nFrames)
 		if total > 0 && framesRead >= total {
 			return
 		}

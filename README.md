@@ -60,7 +60,8 @@ func main() {
         log.Fatal(err)
     }
     for chunk := range h.Chunks() {
-        fmt.Printf("received %d bytes\n", len(chunk))
+        fmt.Printf("received %d bytes (%d frames starting at %d)\n",
+            len(chunk.Data), chunk.FrameCount, chunk.FrameStart)
     }
     h.Stop()
 }

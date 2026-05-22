@@ -38,7 +38,8 @@
 //	}
 //	h.Start()
 //	for chunk := range h.Chunks() {
-//		// process raw bytes...
+//		// chunk.Data contains raw bytes
+//		// chunk.FrameStart is the index of the first frame
 //	}
 //	h.Stop()
 package usb1808

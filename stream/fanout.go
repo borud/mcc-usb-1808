@@ -1,11 +1,15 @@
 package stream
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/borud/mcc-usb-1808/v4/device"
+)
 
 // Fanout broadcasts chunks from a source channel to multiple subscribers.
 // Each subscriber receives independent copies of the data.
 type Fanout struct {
-	src  <-chan []byte
+	src  <-chan device.Chunk
 	subs []*Subscription
 	mu   sync.Mutex
 	done chan struct{}
@@ -14,7 +18,7 @@ type Fanout struct {
 
 // NewFanout creates a Fanout that reads from src.
 // Call Subscribe to add consumers, then Run to start broadcasting.
-func NewFanout(src <-chan []byte) *Fanout {
+func NewFanout(src <-chan device.Chunk) *Fanout {
 	return &Fanout{
 		src:  src,
 		done: make(chan struct{}),
@@ -51,18 +55,23 @@ func (f *Fanout) Run() {
 			var buf []byte
 			if pooled := sub.pool.Get(); pooled != nil {
 				buf = pooled.([]byte)
-				if cap(buf) >= len(chunk) {
-					buf = buf[:len(chunk)]
+				if cap(buf) >= len(chunk.Data) {
+					buf = buf[:len(chunk.Data)]
 				} else {
-					buf = make([]byte, len(chunk))
+					buf = make([]byte, len(chunk.Data))
 				}
 			} else {
-				buf = make([]byte, len(chunk))
+				buf = make([]byte, len(chunk.Data))
 			}
-			copy(buf, chunk)
+			copy(buf, chunk.Data)
 
+			cp := device.Chunk{
+				Data:       buf,
+				FrameStart: chunk.FrameStart,
+				FrameCount: chunk.FrameCount,
+			}
 			select {
-			case sub.ch <- buf:
+			case sub.ch <- cp:
 			default:
 				sub.pool.Put(buf) //nolint:staticcheck
 				sub.dropped.Add(1)
