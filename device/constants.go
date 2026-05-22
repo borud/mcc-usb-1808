@@ -1,7 +1,5 @@
 package device
 
-import "time"
-
 // Command codes (bRequest values for USB control transfers).
 const (
 	cmdDTristate     = 0x00
@@ -53,10 +51,8 @@ const (
 )
 
 // USB endpoint addresses.
-const (
-	epBulkIn  = 0x86 // EP6 IN - analog input scan data
-	epBulkOut = 0x02 // EP2 OUT - analog output scan data
-)
+// epBulkIn is the EP6 IN endpoint for analog input scan data.
+const epBulkIn = 0x86
 
 // Memory addresses.
 const (
@@ -65,9 +61,6 @@ const (
 	memCalDate      = 0x7110
 	memSerialNumber = 0x6FF8
 )
-
-// USB transfer timeout.
-const usbTimeout = 2000 * time.Millisecond
 
 // FPGA configuration unlock code.
 const fpgaUnlockCode = 0xAD

@@ -45,10 +45,14 @@ package capture
 
 // File format constants.
 const (
-	fileMagic            = "DAQ\x00"
-	fileVersion          = 2
-	preambleLen          = 28 // magic(4) + version(1) + flags(1) + headerLen(4) + frameCount(8) + seqNumber(2) + globalFrameOffset(8)
-	frameCountOff        = 10 // byte offset of the frame count field in the preamble
-	seqNumberOff         = 18 // byte offset of the sequence number
-	globalFrameOffsetOff = 20 // byte offset of the global frame offset
+	fileMagic   = "DAQ\x00"
+	fileVersion = 2
+
+	// preambleLen is the total preamble size: magic(4) + version(1) + flags(1) +
+	// headerLen(4) + frameCount(8) + seqNumber(2) + globalFrameOffset(8).
+	preambleLen = 28
+	// frameCountOff is the byte offset of the frame count field in the preamble.
+	frameCountOff = 10
+	// globalFrameOffsetOff is the byte offset of the global frame offset in the preamble.
+	globalFrameOffsetOff = 20
 )
