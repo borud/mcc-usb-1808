@@ -10,17 +10,17 @@ import (
 const defaultBufferFrames = 1024
 
 type segmentWriter struct {
-	f            *os.File
-	pendingPath  string
-	finalPath    string
-	renamed      bool
-	frameSize    int
-	buf          []byte
-	bufUsed      int
+	f             *os.File
+	pendingPath   string
+	finalPath     string
+	renamed       bool
+	frameSize     int
+	buf           []byte
+	bufUsed       int
 	framesWritten uint64
-	seq          uint16
-	globalOffset uint64
-	closed       bool
+	seq           uint16
+	globalOffset  uint64
+	closed        bool
 }
 
 func newSegmentWriter(pendingPath, finalPath string, h Header, seq uint16, globalOffset uint64, bufferFrames int) (*segmentWriter, error) {
@@ -39,7 +39,7 @@ func newSegmentWriter(pendingPath, finalPath string, h Header, seq uint16, globa
 		return nil, err
 	}
 
-	f, err := os.Create(pendingPath) // #nosec G304 -- path constructed internally from segment sequence number
+	f, err := os.OpenFile(pendingPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) // #nosec G304 -- path constructed internally from segment sequence number
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +103,9 @@ func (sw *segmentWriter) writeBulk(data []byte) error {
 
 	if len(data) == 0 {
 		return nil
+	}
+	if len(data)%sw.frameSize != 0 {
+		return ErrFrameAlignment
 	}
 
 	if err := sw.ensureRenamed(); err != nil {

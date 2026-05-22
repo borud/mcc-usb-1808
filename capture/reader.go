@@ -35,11 +35,12 @@ type Reader struct {
 	numCh     int
 
 	// Sequential read state.
-	curSegIdx int
-	curFile   *os.File
-	buf       []byte
-	frame     Frame
-	seqDone   bool
+	curSegIdx       int
+	curFile         *os.File
+	curSegRemaining uint64
+	buf             []byte
+	frame           Frame
+	seqDone         bool
 
 	// Random-access state.
 	raBuf    []byte
@@ -166,16 +167,24 @@ func (rd *Reader) ReadFrame() (*Frame, error) {
 				rd.seqDone = true
 				return nil, io.EOF
 			}
-			f, err := os.Open(rd.segments[rd.curSegIdx].path)
+			seg := rd.segments[rd.curSegIdx]
+			f, err := os.Open(seg.path)
 			if err != nil {
 				return nil, err
 			}
 			// Seek past preamble + header to frame data.
-			if _, err := f.Seek(rd.segments[rd.curSegIdx].dataStartBytes, io.SeekStart); err != nil {
+			if _, err := f.Seek(seg.dataStartBytes, io.SeekStart); err != nil {
 				f.Close()
 				return nil, err
 			}
 			rd.curFile = f
+			rd.curSegRemaining = seg.frameCount
+		}
+
+		if rd.curSegRemaining == 0 {
+			rd.curFile.Close()
+			rd.curFile = nil
+			continue // advance to next segment
 		}
 
 		_, err := io.ReadFull(rd.curFile, rd.buf)
@@ -191,6 +200,7 @@ func (rd *Reader) ReadFrame() (*Frame, error) {
 			return nil, err
 		}
 
+		rd.curSegRemaining--
 		rd.decodeFrame()
 		return &rd.frame, nil
 	}
@@ -262,19 +272,13 @@ func (rd *Reader) ReadFrames(offset uint64, n int) ([]Frame, error) {
 
 		f, err := os.Open(seg.path)
 		if err != nil {
-			if read > 0 {
-				return rd.raFrames[:read], nil
-			}
-			return nil, err
+			return rd.raFrames[:read], err
 		}
 
 		seekPos := seg.dataStartBytes + int64(localOffset)*int64(rd.frameSize)
 		if _, err := f.Seek(seekPos, io.SeekStart); err != nil {
 			f.Close()
-			if read > 0 {
-				return rd.raFrames[:read], nil
-			}
-			return nil, err
+			return rd.raFrames[:read], err
 		}
 
 		totalBytes := int(want) * rd.frameSize
@@ -287,11 +291,8 @@ func (rd *Reader) ReadFrames(offset uint64, n int) ([]Frame, error) {
 		}
 		read += framesRead
 
-		if err != nil && framesRead == 0 {
-			if read > 0 {
-				return rd.raFrames[:read], nil
-			}
-			return nil, err
+		if err != nil {
+			return rd.raFrames[:read], err
 		}
 
 		segIdx++
@@ -400,6 +401,21 @@ func discoverSegments(dir string) ([]segmentInfo, []byte, error) {
 	sort.Slice(segs, func(i, j int) bool {
 		return segs[i].seq < segs[j].seq
 	})
+
+	// Validate segment structure.
+	for i := range segs {
+		if i > 0 && segs[i].seq == segs[i-1].seq {
+			return nil, nil, fmt.Errorf("%w: duplicate sequence number %d", ErrSegmentMismatch, segs[i].seq)
+		}
+		if i > 0 {
+			prev := segs[i-1]
+			expected := prev.globalFrameOffset + prev.frameCount
+			if segs[i].globalFrameOffset != expected {
+				return nil, nil, fmt.Errorf("%w: segment %d offset %d, expected %d",
+					ErrSegmentMismatch, segs[i].seq, segs[i].globalFrameOffset, expected)
+			}
+		}
+	}
 
 	// Read header JSON from first segment for consistency checking.
 	headerJSON, err := readHeaderJSONBytes(segs[0].path)

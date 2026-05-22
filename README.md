@@ -2,7 +2,7 @@
 
 ![Go mascot](docs/mascot.svg)
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/borud/mcc-usb-1808.svg)](https://pkg.go.dev/github.com/borud/mcc-usb-1808)
+[![Go Reference](https://pkg.go.dev/badge/github.com/borud/mcc-usb-1808/v4.svg)](https://pkg.go.dev/github.com/borud/mcc-usb-1808/v4)
 
 This library helps you write applications that interface with the Measurement [Computing Corporation USB 1808 and 1808X](https://digilent.com/shop/mcc-usb-1808x-high-speed-high-precision-simultaneous-usb-daq-device/) DAQs.
 

@@ -21,8 +21,8 @@ var queueNames = map[string]int{
 var scanChanNames = map[int]string{
 	0: "ain0", 1: "ain1", 2: "ain2", 3: "ain3",
 	4: "ain4", 5: "ain5", 6: "ain6", 7: "ain7",
-	8:  "dio",
-	9:  "counter0", 10: "counter1",
+	8: "dio",
+	9: "counter0", 10: "counter1",
 	11: "encoder0", 12: "encoder1",
 }
 
@@ -93,14 +93,18 @@ func parseChannelSpec(spec string, defaultRange device.Range, defaultMode device
 			r := defaultRange
 			m := defaultMode
 			if len(fields) > 1 {
-				if rr, ok := rangeNames[strings.ToLower(fields[1])]; ok {
-					r = rr
+				rr, ok := rangeNames[strings.ToLower(fields[1])]
+				if !ok {
+					return nil, fmt.Errorf("unknown range: %s", fields[1])
 				}
+				r = rr
 			}
 			if len(fields) > 2 {
-				if mm, ok := modeNames[strings.ToLower(fields[2])]; ok {
-					m = mm
+				mm, ok := modeNames[strings.ToLower(fields[2])]
+				if !ok {
+					return nil, fmt.Errorf("unknown mode: %s", fields[2])
 				}
+				m = mm
 			}
 			for _, idx := range expanded {
 				channels = append(channels, makeChannelConfig(idx, r, m))
@@ -120,14 +124,18 @@ func parseChannelSpec(spec string, defaultRange device.Range, defaultMode device
 		r := defaultRange
 		m := defaultMode
 		if len(fields) > 1 {
-			if rr, ok := rangeNames[strings.ToLower(fields[1])]; ok {
-				r = rr
+			rr, ok := rangeNames[strings.ToLower(fields[1])]
+			if !ok {
+				return nil, fmt.Errorf("unknown range: %s", fields[1])
 			}
+			r = rr
 		}
 		if len(fields) > 2 {
-			if mm, ok := modeNames[strings.ToLower(fields[2])]; ok {
-				m = mm
+			mm, ok := modeNames[strings.ToLower(fields[2])]
+			if !ok {
+				return nil, fmt.Errorf("unknown mode: %s", fields[2])
 			}
+			m = mm
 		}
 		channels = append(channels, makeChannelConfig(idx, r, m))
 	}

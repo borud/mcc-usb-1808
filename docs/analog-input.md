@@ -116,7 +116,10 @@ Use the `codec` package to decode raw chunks into typed values:
 ```go
 import "github.com/borud/mcc-usb-1808/v4/codec"
 
-dec := codec.NewDecoder(cfg.Channels, dev.CalibrationTable())
+dec, err := codec.NewDecoder(cfg.Channels, dev.CalibrationTable())
+if err != nil {
+    log.Fatal(err)
+}
 for chunk := range h.Chunks() {
     for frame := range dec.Frames(chunk) {
         voltage := frame.Voltage(0)  // calibrated voltage for channel 0

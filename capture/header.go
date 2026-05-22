@@ -9,7 +9,7 @@ type Header struct {
 	// Device identification.
 	DeviceModel     string    `json:"device_model"`
 	DeviceSerial    string    `json:"device_serial"`
-	FPGAVersion     string    `json:"fpga_version"`               // e.g. "1.2"
+	FPGAVersion     string    `json:"fpga_version"`              // e.g. "1.2"
 	CalibrationDate time.Time `json:"calibration_date,omitzero"` // Factory calibration date from EEPROM.
 
 	// Capture configuration.

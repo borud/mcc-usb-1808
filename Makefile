@@ -33,7 +33,7 @@ $(BINARIES):
 
 run:
 	@echo "*** $@"
-	@go run cmd/
+	@go run ./cmd/daq
 
 test:
 	@echo "*** $@"

@@ -1,6 +1,8 @@
 package device
 
 import (
+	"fmt"
+
 	"github.com/borud/mcc-usb-1808/v4/wire"
 )
 
@@ -36,6 +38,9 @@ func (d *Device) status() (Status, error) {
 	data, err := d.transport.ControlIn(cmdStatus, 0, 0, 2)
 	if err != nil {
 		return 0, err
+	}
+	if len(data) < 2 {
+		return 0, fmt.Errorf("usb1808: status response too short: %d bytes", len(data))
 	}
 	return Status(wire.Uint16LE(data)), nil
 }

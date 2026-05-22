@@ -75,7 +75,7 @@ func createTables(db *sql.DB, cols []string) error {
 	// frames — dynamic columns
 	colDefs := make([]string, len(cols))
 	for i, name := range cols {
-		colDefs[i] = fmt.Sprintf(`"%s" REAL`, name)
+		colDefs[i] = fmt.Sprintf(`"%s" REAL`, quoteIdent(name))
 	}
 	createSQL := fmt.Sprintf(`CREATE TABLE frames (
 		frame_id    INTEGER PRIMARY KEY,
@@ -183,7 +183,7 @@ func insertFrames(db *sql.DB, r *capture.Reader, h capture.Header, cols []string
 	// Build parameterized INSERT.
 	quotedCols := make([]string, numCh)
 	for i, name := range cols {
-		quotedCols[i] = fmt.Sprintf(`"%s"`, name)
+		quotedCols[i] = fmt.Sprintf(`"%s"`, quoteIdent(name))
 	}
 	placeholders := make([]string, numCh+2)
 	for i := range placeholders {
@@ -193,24 +193,18 @@ func insertFrames(db *sql.DB, r *capture.Reader, h capture.Header, cols []string
 		strings.Join(quotedCols, ", "),
 		strings.Join(placeholders, ", "))
 
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(insertSQL)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
 	args := make([]any, numCh+2)
 	frameIdx := 0
 	batchCount := 0
 
+	batch, err := newSQLiteBatch(db, insertSQL)
+	if err != nil {
+		return err
+	}
+
 	for frame, fErr := range r.Frames() {
 		if fErr != nil {
+			batch.rollback()
 			return fErr
 		}
 
@@ -221,7 +215,8 @@ func insertFrames(db *sql.DB, r *capture.Reader, h capture.Header, cols []string
 			args[i+2] = v
 		}
 
-		if _, err := stmt.Exec(args...); err != nil {
+		if err := batch.exec(args...); err != nil {
+			batch.rollback()
 			return err
 		}
 
@@ -229,22 +224,65 @@ func insertFrames(db *sql.DB, r *capture.Reader, h capture.Header, cols []string
 		batchCount++
 
 		if batchCount >= sqliteBatchSize {
-			stmt.Close()
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			tx, err = db.Begin()
-			if err != nil {
-				return err
-			}
-			stmt, err = tx.Prepare(insertSQL)
-			if err != nil {
+			if err := batch.commitAndReset(); err != nil {
 				return err
 			}
 			batchCount = 0
 		}
 	}
 
-	stmt.Close()
-	return tx.Commit()
+	return batch.commit()
+}
+
+type sqliteBatch struct {
+	db        *sql.DB
+	insertSQL string
+	tx        *sql.Tx
+	stmt      *sql.Stmt
+}
+
+func newSQLiteBatch(db *sql.DB, insertSQL string) (*sqliteBatch, error) {
+	b := &sqliteBatch{db: db, insertSQL: insertSQL}
+	if err := b.begin(); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (b *sqliteBatch) begin() error {
+	tx, err := b.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(b.insertSQL)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	b.tx = tx
+	b.stmt = stmt
+	return nil
+}
+
+func (b *sqliteBatch) exec(args ...any) error {
+	_, err := b.stmt.Exec(args...)
+	return err
+}
+
+func (b *sqliteBatch) commitAndReset() error {
+	b.stmt.Close()
+	if err := b.tx.Commit(); err != nil {
+		return err
+	}
+	return b.begin()
+}
+
+func (b *sqliteBatch) commit() error {
+	b.stmt.Close()
+	return b.tx.Commit()
+}
+
+func (b *sqliteBatch) rollback() {
+	b.stmt.Close()
+	b.tx.Rollback()
 }

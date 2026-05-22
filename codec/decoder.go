@@ -2,10 +2,14 @@
 package codec
 
 import (
+	"errors"
 	"iter"
 
 	"github.com/borud/mcc-usb-1808/v4/device"
 )
+
+// ErrNoChannels is returned by [NewDecoder] when the channel list is empty.
+var ErrNoChannels = errors.New("codec: no channels")
 
 // Decoder decodes raw scan chunks into frames and typed values.
 type Decoder struct {
@@ -15,12 +19,18 @@ type Decoder struct {
 }
 
 // NewDecoder creates a Decoder for the given channel configuration and calibration table.
-func NewDecoder(channels []device.ChannelConfig, cal device.CalibrationTable) *Decoder {
-	return &Decoder{
-		channels:  channels,
-		cal:       cal,
-		frameSize: len(channels) * 4,
+// Returns [ErrNoChannels] if channels is empty.
+func NewDecoder(channels []device.ChannelConfig, cal device.CalibrationTable) (*Decoder, error) {
+	if len(channels) == 0 {
+		return nil, ErrNoChannels
 	}
+	ch := make([]device.ChannelConfig, len(channels))
+	copy(ch, channels)
+	return &Decoder{
+		channels:  ch,
+		cal:       cal,
+		frameSize: len(ch) * 4,
+	}, nil
 }
 
 // FrameSize returns the number of bytes per frame.

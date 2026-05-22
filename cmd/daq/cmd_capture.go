@@ -13,21 +13,20 @@ import (
 )
 
 type captureCmd struct {
-	Channels    string  `help:"Channel spec (e.g. ain0-ain3:bp10v:diff,dio,counter0)." default:"analog"`
-	Range       string  `help:"Default voltage range (bp10v,bp5v,up10v,up5v)." default:"bp10v"`
-	Mode        string  `help:"Default input mode (${enum})." default:"diff" enum:"diff,differential,se,single-ended,grounded"`
-	Rate        string  `help:"Sample rate in Hz per channel (supports k/M suffix)." default:"10000"`
-	Count       int     `help:"Number of scans (0=continuous)." default:"0"`
-	Trigger     string  `help:"Trigger mode (${enum})." default:"none" enum:"none,rising,falling,high,low"`
-	Retrigger   uint32  `help:"Scans per trigger event (0=disabled)." default:"0"`
-	Out         string  `help:"Output directory (default: capture_<timestamp>)." short:"o"`
-	FileSize    int     `help:"Target segment file size in bytes." default:"104857600"`
-	BufferSize  int     `help:"Frames to buffer before flushing." default:"8192"`
-	Pipeline    int     `help:"USB read-ahead pipeline depth (batches buffered)." default:"32"`
-	Description string  `help:"Free-form description stored in capture header." default:""`
-	Operator    string  `help:"Operator name stored in capture header." default:""`
-	SessionID   string  `help:"Session identifier stored in capture header." default:""`
-	CPUProfile  string  `help:"Write CPU profile to file." default:""`
+	Channels    string `help:"Channel spec (e.g. ain0-ain3:bp10v:diff,dio,counter0)." default:"analog"`
+	Range       string `help:"Default voltage range (bp10v,bp5v,up10v,up5v)." default:"bp10v"`
+	Mode        string `help:"Default input mode (${enum})." default:"diff" enum:"diff,differential,se,single-ended,grounded"`
+	Rate        string `help:"Sample rate in Hz per channel (supports k/M suffix)." default:"10000"`
+	Count       uint32 `help:"Number of scans (0=continuous)." default:"0"`
+	Trigger     string `help:"Trigger mode (${enum})." default:"none" enum:"none,rising,falling,high,low"`
+	Out         string `help:"Output directory (default: capture_<timestamp>)." short:"o"`
+	FileSize    int    `help:"Target segment file size in bytes." default:"104857600"`
+	BufferSize  int    `help:"Frames to buffer before flushing." default:"8192"`
+	Pipeline    int    `help:"USB read-ahead pipeline depth (batches buffered)." default:"32"`
+	Description string `help:"Free-form description stored in capture header." default:""`
+	Operator    string `help:"Operator name stored in capture header." default:""`
+	SessionID   string `help:"Session identifier stored in capture header." default:""`
+	CPUProfile  string `help:"Write CPU profile to file." default:""`
 }
 
 func (c *captureCmd) Run(app *cli) error {
@@ -74,14 +73,10 @@ func (c *captureCmd) Run(app *cli) error {
 			return fmt.Errorf("trigger: %w", err)
 		}
 	}
-	if c.Retrigger > 0 {
-		scanOpts |= device.ScanOptRetriggerMode
-	}
-
 	cfg := device.ScanConfig{
 		Channels: channels,
 		Rate:     rate,
-		Count:    uint32(c.Count),
+		Count:    c.Count,
 		Options:  scanOpts,
 	}
 
@@ -143,6 +138,7 @@ func (c *captureCmd) Run(app *cli) error {
 			if writeErr == nil {
 				if err := cw.WriteBulk(data); err != nil {
 					writeErr = err
+					handle.Stop()
 				}
 			}
 			writePool <- data[:cap(data)]
@@ -197,23 +193,16 @@ func (c *captureCmd) buildHeader(dev *device.Device, channels []device.ChannelCo
 	for i, ch := range channels {
 		cc := capture.Channel{
 			Index: ch.Index,
+			Type:  capture.ChannelTypeFromDevice(ch.Type),
 			Name:  scanChanNames[ch.Index],
 		}
-		switch ch.Type {
-		case device.ChannelTypeAnalog:
-			cc.Type = capture.AnalogIn
+		if ch.Type == device.ChannelTypeAnalog {
 			cc.Range = uint8(ch.Range)
 			cal := calTable[ch.Index][ch.Range]
 			cc.Cal = &capture.CalEntry{
 				Slope:  cal.Slope,
 				Offset: cal.Offset,
 			}
-		case device.ChannelTypeDIO:
-			cc.Type = capture.DigitalIO
-		case device.ChannelTypeCounter:
-			cc.Type = capture.Counter
-		case device.ChannelTypeEncoder:
-			cc.Type = capture.Encoder
 		}
 		chDescs[i] = cc
 	}

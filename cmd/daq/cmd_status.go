@@ -20,15 +20,15 @@ func (c *statusCmd) Run(app *cli) error {
 
 	if c.Format == "json" {
 		return printJSON(map[string]any{
-			"raw":               fmt.Sprintf("0x%04X", uint16(status)),
-			"fpga_configured":   status.FPGAConfigured(),
-			"fpga_config_mode":  status.FPGAConfigMode(),
-			"ain_scan_running":  status.AInScanRunning(),
-			"ain_scan_overrun":  status.AInScanOverrun(),
-			"ain_scan_done":     status.AInScanDone(),
-			"aout_scan_running": status.AOutScanRunning(),
+			"raw":                fmt.Sprintf("0x%04X", uint16(status)),
+			"fpga_configured":    status.FPGAConfigured(),
+			"fpga_config_mode":   status.FPGAConfigMode(),
+			"ain_scan_running":   status.AInScanRunning(),
+			"ain_scan_overrun":   status.AInScanOverrun(),
+			"ain_scan_done":      status.AInScanDone(),
+			"aout_scan_running":  status.AOutScanRunning(),
 			"aout_scan_underrun": status.AOutScanUnderrun(),
-			"aout_scan_done":    status.AOutScanDone(),
+			"aout_scan_done":     status.AOutScanDone(),
 		})
 	}
 

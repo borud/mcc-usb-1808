@@ -121,50 +121,22 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 		}
 		totalSize += fi.Size()
 
-		f, err := os.Open(path) // #nosec G304 -- CLI tool, path from user args
-		if err != nil {
-			continue
-		}
-		pre, err := readPreamble(f)
-		f.Close()
+		pre, err := capture.ReadSegmentInfo(path)
 		if err != nil {
 			continue
 		}
 		fmt.Printf("  %-6d  %-12d  %-14d  %s\n",
-			pre.sequenceNumber, pre.frameCount, pre.globalFrameOffset, humanBytes(fi.Size()))
+			pre.SequenceNumber, pre.FrameCount, pre.GlobalFrameOffset, humanBytes(fi.Size()))
 	}
 	fmt.Printf("\nTotal size:      %s\n", humanBytes(totalSize))
 
 	return nil
 }
 
-// readPreamble reads the capture preamble from an open file.
-func readPreamble(f *os.File) (struct {
-	sequenceNumber    uint16
-	frameCount        uint64
-	globalFrameOffset uint64
-}, error) {
-	type result struct {
-		sequenceNumber    uint16
-		frameCount        uint64
-		globalFrameOffset uint64
-	}
-
-	buf := make([]byte, 28) // preambleLen
-	if _, err := f.Read(buf); err != nil {
-		return result{}, err
-	}
-
-	return result{
-		sequenceNumber:    uint16(buf[18]) | uint16(buf[19])<<8,
-		frameCount:        uint64(buf[10]) | uint64(buf[11])<<8 | uint64(buf[12])<<16 | uint64(buf[13])<<24 | uint64(buf[14])<<32 | uint64(buf[15])<<40 | uint64(buf[16])<<48 | uint64(buf[17])<<56,
-		globalFrameOffset: uint64(buf[20]) | uint64(buf[21])<<8 | uint64(buf[22])<<16 | uint64(buf[23])<<24 | uint64(buf[24])<<32 | uint64(buf[25])<<40 | uint64(buf[26])<<48 | uint64(buf[27])<<56,
-	}, nil
-}
 
 // fileExportCmd exports a capture to another format.
 type fileExportCmd struct {
-	ExportFormat string `help:"Export format (${enum})." enum:"csv,excel,sqlite,wav,parquet" required:"" name:"to"`
+	ExportFormat string `help:"Export format (${enum})." enum:"csv,sqlite,wav,parquet" required:"" name:"to"`
 	Out          string `help:"Output file path." short:"o"`
 	Overwrite    bool   `help:"Overwrite existing output file." default:"false"`
 	Raw          bool   `help:"Include raw sample columns where supported." default:"false"`
@@ -173,7 +145,6 @@ type fileExportCmd struct {
 
 var formatExtensions = map[string]string{
 	"csv":     ".csv",
-	"excel":   ".xlsx",
 	"sqlite":  ".db",
 	"wav":     ".wav",
 	"parquet": ".parquet",
@@ -223,8 +194,6 @@ func (c *fileExportCmd) Run(_ *cli) error {
 		if closeErr := out.Close(); closeErr != nil && exportErr == nil {
 			exportErr = closeErr
 		}
-	case "excel":
-		exportErr = fmt.Errorf("excel export has been removed; use csv or parquet instead")
 	case "sqlite":
 		exportErr = export.SQLite(outPath, r)
 	case "wav":

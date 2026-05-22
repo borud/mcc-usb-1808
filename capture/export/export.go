@@ -8,6 +8,7 @@ package export
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
 )
@@ -31,4 +32,10 @@ func columnNames(channels []capture.Channel) []string {
 		names[i] = name
 	}
 	return names
+}
+
+// quoteIdent escapes a string for use as a SQL double-quoted identifier
+// by doubling any embedded double-quote characters.
+func quoteIdent(s string) string {
+	return strings.ReplaceAll(s, `"`, `""`)
 }

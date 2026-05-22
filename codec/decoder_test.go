@@ -50,7 +50,7 @@ func TestVoltage_AllRanges(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ch := []device.ChannelConfig{{Index: 0, Type: device.ChannelTypeAnalog, Range: tt.r}}
-			d := NewDecoder(ch, cal)
+			d, _ := NewDecoder(ch, cal)
 			chunk := makeFrame(tt.raw)
 			for frame := range d.Frames(chunk) {
 				got := frame.Voltage(0)
@@ -63,7 +63,7 @@ func TestVoltage_AllRanges(t *testing.T) {
 
 	// Verify non-analog returns raw value.
 	dioCh := []device.ChannelConfig{{Index: 8, Type: device.ChannelTypeDIO}}
-	dioDec := NewDecoder(dioCh, cal)
+	dioDec, _ := NewDecoder(dioCh, cal)
 	chunk := makeFrame(0x55)
 	for frame := range dioDec.Frames(chunk) {
 		got := frame.Voltage(0)
@@ -79,7 +79,7 @@ func TestFrames_Count(t *testing.T) {
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 		{Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 	}
-	dec := NewDecoder(channels, cal)
+	dec, _ := NewDecoder(channels, cal)
 
 	// 3 frames of 2 channels = 24 bytes.
 	chunk := make([]byte, 3*2*4)
@@ -102,7 +102,7 @@ func TestFrames_PartialChunk(t *testing.T) {
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 		{Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 	}
-	dec := NewDecoder(channels, cal)
+	dec, _ := NewDecoder(channels, cal)
 
 	// 2.5 frames worth of data — only 2 should be yielded.
 	chunk := make([]byte, 2*2*4+4) // 20 bytes, frameSize=8
@@ -121,7 +121,7 @@ func TestRawUint32(t *testing.T) {
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 		{Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP5V},
 	}
-	dec := NewDecoder(channels, cal)
+	dec, _ := NewDecoder(channels, cal)
 
 	chunk := makeFrame(12345, 67890)
 	for frame := range dec.Frames(chunk) {
@@ -140,7 +140,7 @@ func TestDigital(t *testing.T) {
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 		{Index: 8, Type: device.ChannelTypeDIO},
 	}
-	dec := NewDecoder(channels, cal)
+	dec, _ := NewDecoder(channels, cal)
 
 	chunk := makeFrame(131072, 0xAB)
 	for frame := range dec.Frames(chunk) {
@@ -155,7 +155,7 @@ func TestDigital_NoDIO(t *testing.T) {
 	channels := []device.ChannelConfig{
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 	}
-	dec := NewDecoder(channels, cal)
+	dec, _ := NewDecoder(channels, cal)
 
 	chunk := makeFrame(131072)
 	for frame := range dec.Frames(chunk) {
@@ -173,7 +173,7 @@ func TestVoltage_WithCalibration(t *testing.T) {
 	channels := []device.ChannelConfig{
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
 	}
-	dec := NewDecoder(channels, cal)
+	dec, _ := NewDecoder(channels, cal)
 
 	// raw=131072 with slope=1.001 offset=5 → calibrated = 131072*1.001 + 5 = 131203.072 + 5 = 131208
 	// voltage = (round(131208.072) - 131072) * 10 / 131072 = 136 * 10 / 131072 ≈ 0.01037

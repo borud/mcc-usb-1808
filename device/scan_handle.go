@@ -4,10 +4,19 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/borud/mcc-usb-1808/v4/transport"
 	"github.com/borud/mcc-usb-1808/v4/wire"
+)
+
+type scanState int
+
+const (
+	scanIdle scanState = iota
+	scanRunning
+	scanStopped
 )
 
 // ScanHandle represents a configured scan that can be started and stopped.
@@ -20,12 +29,15 @@ type ScanHandle struct {
 	options  uint8
 	opts     scanOptions
 
-	frameSize int // bytes per frame (nChannels * 4)
-	chunks    chan []byte
-	stop      chan struct{}
-	done      chan struct{}
-	err       error
-	mu        sync.Mutex
+	frameSize  int // bytes per frame (nChannels * 4)
+	chunks     chan []byte
+	stop       chan struct{}
+	done       chan struct{}
+	err        error
+	mu         sync.Mutex
+	state      scanState
+	stopOnce   sync.Once
+	poolMisses atomic.Int64
 }
 
 // CreateScan configures the hardware for scanning and returns a handle.
@@ -94,10 +106,24 @@ func (h *ScanHandle) Chunks() <-chan []byte {
 
 // Start begins the scan, launching reader goroutines.
 func (h *ScanHandle) Start() error {
+	h.mu.Lock()
+	if h.state != scanIdle {
+		h.mu.Unlock()
+		return ErrScanRunning
+	}
+	h.state = scanRunning
+	h.mu.Unlock()
+
 	// Clear FIFO.
 	h.dev.mu.Lock()
-	_ = h.dev.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
+	err := h.dev.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
 	h.dev.mu.Unlock()
+	if err != nil {
+		h.mu.Lock()
+		h.state = scanIdle
+		h.mu.Unlock()
+		return fmt.Errorf("clear FIFO: %w", err)
+	}
 
 	// Check if async path is available.
 	if ar, ok := h.dev.transport.(transport.AsyncBulkReader); ok {
@@ -108,12 +134,19 @@ func (h *ScanHandle) Start() error {
 
 // Stop stops the scan and waits for all readers to finish.
 func (h *ScanHandle) Stop() error {
-	select {
-	case <-h.stop:
-		// Already stopped.
-	default:
-		close(h.stop)
+	h.mu.Lock()
+	switch h.state {
+	case scanIdle:
+		h.mu.Unlock()
+		return ErrScanNotStarted
+	case scanStopped:
+		h.mu.Unlock()
+		return ErrScanStopped
 	}
+	h.state = scanStopped
+	h.mu.Unlock()
+
+	h.stopOnce.Do(func() { close(h.stop) })
 
 	// Send stop command.
 	h.dev.mu.Lock()
@@ -188,6 +221,11 @@ func (h *ScanHandle) startSync() error {
 func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 	defer close(h.done)
 	defer close(h.chunks)
+	defer func() {
+		if n := h.poolMisses.Load(); n > 0 {
+			h.dev.log.Warn("buffer pool exhausted during scan", "misses", n)
+		}
+	}()
 
 	numReaders := h.opts.concurrentReaders
 	poolSize := h.opts.pipelineDepth + numReaders
@@ -223,6 +261,9 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 				case buf = <-free:
 				case <-h.stop:
 					return
+				default:
+					buf = make([]byte, batchBytes)
+					h.poolMisses.Add(1)
 				}
 
 				n, err := h.dev.transport.BulkReadInto(epBulkIn, buf, readTimeout)
@@ -260,8 +301,8 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 		close(ch)
 	}()
 
-	total := int(h.count)
-	framesRead := 0
+	total := h.count
+	var framesRead uint32
 
 	for result := range ch {
 		if result.err != nil {
@@ -274,7 +315,7 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 		data = data[:len(data)/h.frameSize*h.frameSize]
 
 		if total > 0 {
-			remaining := (total - framesRead) * h.frameSize
+			remaining := int(total-framesRead) * h.frameSize
 			if len(data) > remaining {
 				data = data[:remaining]
 			}
@@ -291,7 +332,7 @@ func (h *ScanHandle) runSyncReaders(batchBytes int, readTimeout time.Duration) {
 			free <- result.buf
 		}
 
-		framesRead += len(data) / h.frameSize
+		framesRead += uint32(len(data) / h.frameSize)
 		if total > 0 && framesRead >= total {
 			return
 		}
@@ -338,8 +379,8 @@ func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
 	defer close(h.chunks)
 	defer ring.Stop()
 
-	total := int(h.count)
-	framesRead := 0
+	total := h.count
+	var framesRead uint32
 
 	// Monitor for stop signal.
 	go func() {
@@ -369,7 +410,7 @@ func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
 		data = data[:len(data)/h.frameSize*h.frameSize]
 
 		if total > 0 {
-			remaining := (total - framesRead) * h.frameSize
+			remaining := int(total-framesRead) * h.frameSize
 			if len(data) > remaining {
 				data = data[:remaining]
 			}
@@ -383,7 +424,7 @@ func (h *ScanHandle) runAsyncReader(ring *transport.BulkRing) {
 			}
 		}
 
-		framesRead += len(data) / h.frameSize
+		framesRead += uint32(len(data) / h.frameSize)
 		if total > 0 && framesRead >= total {
 			return
 		}

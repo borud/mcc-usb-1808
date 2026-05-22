@@ -225,7 +225,6 @@ func TestCSV_EmptyCapture(t *testing.T) {
 	}
 }
 
-
 func TestSQLite_Basic(t *testing.T) {
 	r := testReader(t)
 	defer r.Close()

@@ -3,8 +3,15 @@ package capture
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 )
+
+const maxHeaderLen = 1 << 20 // 1 MiB
+
+var errReservedFlags = errors.New("capture: reserved flags byte is non-zero")
 
 type preamble struct {
 	headerLen         uint32
@@ -25,9 +32,17 @@ func readPreamble(r io.Reader) (preamble, error) {
 	if buf[4] != fileVersion {
 		return preamble{}, ErrUnsupportedVersion
 	}
+	if buf[5] != 0 {
+		return preamble{}, errReservedFlags
+	}
+
+	hLen := binary.LittleEndian.Uint32(buf[6:])
+	if hLen > maxHeaderLen {
+		return preamble{}, fmt.Errorf("capture: header length %d exceeds maximum %d", hLen, maxHeaderLen)
+	}
 
 	return preamble{
-		headerLen:         binary.LittleEndian.Uint32(buf[6:]),
+		headerLen:         hLen,
 		frameCount:        binary.LittleEndian.Uint64(buf[10:]),
 		sequenceNumber:    binary.LittleEndian.Uint16(buf[18:]),
 		globalFrameOffset: binary.LittleEndian.Uint64(buf[20:]),
@@ -62,6 +77,32 @@ func readHeaderJSON(r io.Reader, length uint32) (Header, error) {
 		return Header{}, err
 	}
 	return h, nil
+}
+
+// SegmentInfo holds summary information from a segment file preamble.
+type SegmentInfo struct {
+	SequenceNumber    uint16
+	FrameCount        uint64
+	GlobalFrameOffset uint64
+}
+
+// ReadSegmentInfo reads the preamble of a segment file and returns summary info.
+func ReadSegmentInfo(path string) (SegmentInfo, error) {
+	f, err := os.Open(path) // #nosec G304 -- path from caller
+	if err != nil {
+		return SegmentInfo{}, err
+	}
+	defer f.Close()
+
+	pre, err := readPreamble(f)
+	if err != nil {
+		return SegmentInfo{}, err
+	}
+	return SegmentInfo{
+		SequenceNumber:    pre.sequenceNumber,
+		FrameCount:        pre.frameCount,
+		GlobalFrameOffset: pre.globalFrameOffset,
+	}, nil
 }
 
 func sampleSize(f DataFormat) (int, error) {

@@ -13,8 +13,8 @@ func TestAInScanStartPayload(t *testing.T) {
 		0xE8, 0x03, 0x00, 0x00, // scan_count = 1000
 		0x00, 0x00, 0x00, 0x00, // retrig_count = 0
 		0xE7, 0x03, 0x00, 0x00, // pacer_period = 999
-		0xFF,                   // packet_size = 255
-		0x00,                   // options = 0
+		0xFF, // packet_size = 255
+		0x00, // options = 0
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("AInScanStartPayload mismatch:\ngot:  %x\nwant: %x", got, want)
@@ -39,11 +39,11 @@ func TestPacerPeriod(t *testing.T) {
 		freq float64
 		want uint32
 	}{
-		{100000, 999},  // 100 kHz
-		{50000, 1999},  // 50 kHz
-		{200000, 499},  // 200 kHz
-		{0, 0},         // external clock
-		{-1, 0},        // external clock
+		{100000, 999}, // 100 kHz
+		{50000, 1999}, // 50 kHz
+		{200000, 499}, // 200 kHz
+		{0, 0},        // external clock
+		{-1, 0},       // external clock
 	}
 	for _, tt := range tests {
 		got := PacerPeriod(tt.freq)

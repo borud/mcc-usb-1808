@@ -12,4 +12,6 @@ var (
 	ErrInvalidRange      = errors.New("usb1808: invalid voltage range")
 	ErrInvalidMode       = errors.New("usb1808: invalid input mode")
 	ErrNotInitialized    = errors.New("usb1808: device not initialized")
+	ErrScanNotStarted    = errors.New("usb1808: scan not started")
+	ErrScanStopped       = errors.New("usb1808: scan already stopped")
 )

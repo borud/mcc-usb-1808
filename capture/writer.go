@@ -177,11 +177,15 @@ func (w *Writer) Close() error {
 	if w.closed {
 		return ErrWriterClosed
 	}
-	w.closed = true
 
 	err := w.current.closeKeep()
-	w.next.closeRemoveIfEmpty()
-	return err
+	nextErr := w.next.closeRemoveIfEmpty()
+	w.closed = true
+
+	if err != nil {
+		return err
+	}
+	return nextErr
 }
 
 // FramesWritten returns the total number of frames written across all

@@ -31,10 +31,10 @@ func (c *infoCmd) Run(app *cli) error {
 
 	if c.Format == "json" {
 		info := map[string]any{
-			"model":         model.String(),
-			"serial":        serial,
-			"fpga_version":  fmt.Sprintf("%d.%d", major, minor),
-			"status_raw":    fmt.Sprintf("0x%04X", uint16(status)),
+			"model":           model.String(),
+			"serial":          serial,
+			"fpga_version":    fmt.Sprintf("%d.%d", major, minor),
+			"status_raw":      fmt.Sprintf("0x%04X", uint16(status)),
 			"fpga_configured": status.FPGAConfigured(),
 		}
 

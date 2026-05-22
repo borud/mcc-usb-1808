@@ -2,11 +2,16 @@ package export
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"math"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
 )
+
+const maxWAVDataSize = math.MaxUint32 - 36
+
+var errWAVTooLarge = errors.New("export: data exceeds WAV 4 GiB limit")
 
 // WAV writes all remaining frames from r as a WAV audio file to w.
 //
@@ -42,6 +47,9 @@ func WAV(w io.Writer, r *capture.Reader) error {
 	bytesPerSample := bitsPerSample / 8
 	blockAlign := numCh * bytesPerSample
 	dataSize := numFrames * blockAlign
+	if dataSize > maxWAVDataSize {
+		return errWAVTooLarge
+	}
 	sampleRate := uint32(h.SampleRate)
 
 	// Compute normalization scale per channel.

@@ -23,9 +23,10 @@ func AOutScanStartPayload(scanCount, retrigCount, pacerPeriod uint32, options ui
 }
 
 // PacerPeriod calculates the pacer period from a frequency in Hz.
-// Returns 0 for external clock (frequency <= 0).
+// Returns 0 for external clock (frequency <= 0) or frequencies above the
+// base clock (100 MHz).
 func PacerPeriod(frequency float64) uint32 {
-	if frequency <= 0 {
+	if frequency <= 0 || frequency > 100_000_000 {
 		return 0
 	}
 	return uint32(100_000_000/frequency) - 1
@@ -33,8 +34,14 @@ func PacerPeriod(frequency float64) uint32 {
 
 // TimerParams encodes timer frequency and duty cycle into period and pulse width
 // values for the TIMER_PARAMETERS command.
-// Returns (period, pulseWidth).
+// Returns (period, pulseWidth). Returns (0, 0) for invalid inputs.
 func TimerParams(frequency, dutyCycle float64) (uint32, uint32) {
+	if frequency <= 0 || frequency > 100_000_000 {
+		return 0, 0
+	}
+	if dutyCycle <= 0 || dutyCycle > 1 {
+		return 0, 0
+	}
 	period := uint32(100_000_000/frequency) - 1
 	pulseWidth := uint32(float64(period+1)*dutyCycle) - 1
 	return period, pulseWidth

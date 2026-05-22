@@ -2,7 +2,7 @@
 
 The `capture` package provides a binary directory format for recording and
 replaying DAQ data. The `capture/export` subpackage converts capture
-directories to CSV, Excel, SQLite, Parquet, and WAV.
+directories to CSV, SQLite, Parquet, and WAV.
 
 ## File Format
 
@@ -214,15 +214,18 @@ Non-analog channels are returned as `float64(raw)` without calibration.
 
 ## Errors
 
-| Error                   | Meaning                                |
-|-------------------------|----------------------------------------|
-| `ErrInvalidMagic`       | File does not start with `DAQ\x00`     |
-| `ErrUnsupportedVersion` | File version newer than supported      |
-| `ErrFrameSizeMismatch`  | Value count != channel count           |
-| `ErrWriterClosed`       | Writer method called after Close       |
-| `ErrReaderClosed`       | Reader method called after Close       |
-| `ErrNoChannels`         | Header has empty Channels slice        |
-| `ErrInvalidFormat`      | Unrecognized DataFormat or format mismatch |
+| Error                   | Meaning                                          |
+|-------------------------|--------------------------------------------------|
+| `ErrInvalidMagic`       | File does not start with `DAQ\x00`               |
+| `ErrUnsupportedVersion` | File version newer than supported                |
+| `ErrWriterClosed`       | Writer method called after Close                 |
+| `ErrReaderClosed`       | Reader method called after Close                 |
+| `ErrNoChannels`         | Header has empty Channels slice                  |
+| `ErrInvalidFormat`      | Unrecognized DataFormat or format mismatch       |
+| `ErrFrameAlignment`     | WriteBulk data not a multiple of frame size      |
+| `ErrNotDirectory`       | Path passed to NewReader is not a directory      |
+| `ErrNoSegments`         | Capture directory contains no segment files      |
+| `ErrSegmentMismatch`    | Segment headers are inconsistent across files    |
 
 ## Export
 

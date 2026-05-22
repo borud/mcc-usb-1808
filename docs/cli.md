@@ -108,7 +108,6 @@ daq capture --channels all --rate 100k --trigger rising
 | `--rate`        | `10000`   | Sample rate in Hz per channel (supports k/M suffix)  |
 | `--count`       | 0         | Number of scans (0 = continuous)                     |
 | `--trigger`     | `none`    | Trigger: none, rising, falling, high, low            |
-| `--retrigger`   | 0         | Scans per trigger event (0 = disabled)               |
 | `-o`            |           | Output directory (default: `capture_<timestamp>`)    |
 | `--file-size`   | 104857600 | Target segment file size in bytes                    |
 | `--buffer-size` | 8192      | Frames to buffer before flushing                     |

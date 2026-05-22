@@ -14,6 +14,7 @@ const (
 // Model identifies the hardware variant.
 type Model uint16
 
+// Hardware model variants.
 const (
 	USB1808  Model = PID1808
 	USB1808X Model = PID1808X
@@ -33,6 +34,7 @@ func (m Model) String() string {
 // Range codes for analog input channels.
 type Range uint8
 
+// Analog input voltage ranges.
 const (
 	BP10V Range = 0 // +/- 10V bipolar
 	BP5V  Range = 1 // +/- 5V bipolar
@@ -58,6 +60,7 @@ func (r Range) String() string {
 // InputMode codes for analog input channels.
 type InputMode uint8
 
+// Analog input modes.
 const (
 	Differential InputMode = 0
 	SingleEnded  InputMode = 1
@@ -80,11 +83,12 @@ func (m InputMode) String() string {
 // ChannelType identifies the kind of channel in the scan queue.
 type ChannelType uint8
 
+// Scan queue channel types.
 const (
-	ChannelTypeAnalog   ChannelType = 0
-	ChannelTypeDIO      ChannelType = 1
-	ChannelTypeCounter  ChannelType = 2
-	ChannelTypeEncoder  ChannelType = 3
+	ChannelTypeAnalog  ChannelType = 0
+	ChannelTypeDIO     ChannelType = 1
+	ChannelTypeCounter ChannelType = 2
+	ChannelTypeEncoder ChannelType = 3
 )
 
 func (t ChannelType) String() string {

@@ -56,16 +56,23 @@ func validateScanConfig(cfg ScanConfig) error {
 		if ch.Index < 0 || ch.Index > 12 {
 			return fmt.Errorf("%w: scan queue index %d", ErrInvalidChannel, ch.Index)
 		}
-		if ch.Type == ChannelTypeAnalog {
+		switch ch.Type {
+		case ChannelTypeAnalog:
 			if ch.Index >= NumAInChannels {
 				return fmt.Errorf("%w: analog channel %d", ErrInvalidChannel, ch.Index)
 			}
 			if ch.Range > UP5V {
 				return fmt.Errorf("%w: %d", ErrInvalidRange, ch.Range)
 			}
-			if ch.Mode == 2 {
-				return fmt.Errorf("%w: mode code 2 is undefined", ErrInvalidMode)
+			if ch.Mode != Differential && ch.Mode != SingleEnded && ch.Mode != Grounded {
+				return fmt.Errorf("%w: mode code %d", ErrInvalidMode, ch.Mode)
 			}
+		case ChannelTypeDIO, ChannelTypeCounter, ChannelTypeEncoder:
+			if ch.Range != 0 || ch.Mode != 0 {
+				return fmt.Errorf("%w: range/mode must be zero for %s channel", ErrInvalidChannel, ch.Type)
+			}
+		default:
+			return fmt.Errorf("%w: unknown channel type %d", ErrInvalidChannel, ch.Type)
 		}
 	}
 	return nil

@@ -33,6 +33,37 @@ Both models provide:
 - [CLI Tool](cli.md) -- the `daq` command-line tool
 - [Errors](errors.md) -- sentinel errors reference
 
+## Package Structure
+
+```
+github.com/borud/mcc-usb-1808/v4
+├── device      Core driver: open, init, configure, scan
+├── codec       Decode raw scan chunks into frames and voltages
+├── capture     Binary capture format: segmented reader/writer
+├── capture/export  Export captures to CSV, SQLite, Parquet, WAV
+├── stream      Fan-out: broadcast scan data to multiple consumers
+├── wire        Protocol-level serialization (internal)
+└── transport   USB abstraction layer (internal)
+```
+
+Most applications use three packages:
+
+- **`device`** -- open the hardware, configure a scan, and read raw data via
+  `CreateScan` / `ScanHandle`.
+- **`codec`** -- decode raw scan chunks into typed `Frame` values with
+  calibrated voltages, digital I/O, counter, and encoder readings.
+- **`capture`** -- record raw scan data to disk and replay it later. The writer
+  accepts raw bytes directly from `ScanHandle.Chunks()` for a zero-copy fast
+  path. The reader produces `Frame` values with calibrated voltages, just like
+  `codec`.
+
+For multi-consumer pipelines (e.g. simultaneous recording and live display),
+the **`stream`** package provides a `Fanout` that copies each chunk to multiple
+subscribers without blocking the scan.
+
+The **`wire`** and **`transport`** packages are internal to the driver and not
+intended for direct use.
+
 ## Import
 
 ```go

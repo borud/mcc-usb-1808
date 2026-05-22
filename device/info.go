@@ -27,6 +27,9 @@ func (d *Device) FPGAVersion() (uint8, uint8, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	if len(data) < 2 {
+		return 0, 0, fmt.Errorf("usb1808: FPGA version response too short: %d bytes", len(data))
+	}
 	ver := wire.Uint16LE(data)
 	return uint8(ver >> 8), uint8(ver & 0xFF), nil
 }

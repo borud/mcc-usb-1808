@@ -8,14 +8,14 @@ matched with `errors.Is`.
 |------------------------|-----------------------------------------------------|
 | `ErrDeviceNotFound`    | No USB-1808 or USB-1808X found on the bus.          |
 | `ErrFPGANotConfigured` | FPGA image failed to load or is not present.        |
+| `ErrNotInitialized`    | `Init` has not been called yet.                     |
 | `ErrScanOverrun`       | Analog input FIFO overrun (host read too slowly).   |
-| `ErrScanUnderrun`      | Analog output FIFO underrun (host wrote too slowly).|
 | `ErrScanRunning`       | A scan is already in progress.                      |
-| `ErrInvalidChannel`    | Channel number out of valid range.                  |
+| `ErrScanNotStarted`    | `Stop` called before `Start`.                       |
+| `ErrScanStopped`       | `Stop` called on an already-stopped scan.           |
+| `ErrInvalidChannel`    | Channel number or type out of valid range.          |
 | `ErrInvalidRange`      | Unrecognized voltage range code.                    |
 | `ErrInvalidMode`       | Unrecognized input mode (mode 2 is undefined).      |
-| `ErrTransferFailed`    | USB transfer did not complete.                      |
-| `ErrTimeout`           | USB transfer timed out.                             |
 
 ## Error Wrapping
 

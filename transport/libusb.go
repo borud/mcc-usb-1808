@@ -106,6 +106,9 @@ func (t *LibUSBTransport) ControlIn(request uint8, wValue, wIndex uint16, length
 // This allows concurrent bulk reads while control transfers proceed
 // independently on the default endpoint.
 func (t *LibUSBTransport) BulkRead(endpoint uint8, length int, timeout time.Duration) ([]byte, error) {
+	if length <= 0 {
+		return nil, nil
+	}
 	buf := make([]byte, length)
 	var transferred C.int
 
@@ -126,6 +129,9 @@ func (t *LibUSBTransport) BulkRead(endpoint uint8, length int, timeout time.Dura
 // BulkReadInto implements Transport.
 // Like BulkRead but reads into a caller-provided buffer to avoid allocation.
 func (t *LibUSBTransport) BulkReadInto(endpoint uint8, buf []byte, timeout time.Duration) (int, error) {
+	if len(buf) == 0 {
+		return 0, nil
+	}
 	var transferred C.int
 	rc := C.libusb_bulk_transfer(
 		t.handle,

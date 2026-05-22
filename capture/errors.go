@@ -40,4 +40,8 @@ var (
 	// ErrSegmentMismatch is returned by [NewReader] when segment headers
 	// are inconsistent across files in the same capture directory.
 	ErrSegmentMismatch = errors.New("capture: segment headers are inconsistent")
+
+	// ErrFrameAlignment is returned by [Writer.WriteBulk] when the data
+	// length is not a multiple of the frame size.
+	ErrFrameAlignment = errors.New("capture: data length is not a multiple of frame size")
 )

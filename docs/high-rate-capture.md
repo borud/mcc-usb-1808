@@ -9,10 +9,6 @@ particularly when encountering FIFO overruns (`ErrScanOverrun`).
 is not applied during capture -- it is applied later when reading or exporting
 the capture file. This keeps the write path fast and allocation-free.
 
-`daq analog scan` is for calibrated display and inspection at moderate rates.
-It applies per-sample voltage conversion and is not intended for sustained
-high-rate file capture.
-
 ## Diagnosing Overruns
 
 A FIFO overrun means the host did not drain USB data fast enough and the
@@ -23,8 +19,8 @@ fall behind:
 - **Disk I/O jitter**: slow or network-mounted disks can stall writes. Use a
   local SSD for high-rate captures.
 - **Terminal output**: printing calibrated samples at high rates is expensive.
-  Use `daq capture` (no terminal output) rather than `daq analog scan` for
-  sustained recording.
+  Use `daq capture` for sustained recording to disk rather than processing
+  samples in real time.
 - **Insufficient write buffering**: increase `--buffer-size` (default 8192
   frames) to absorb disk write jitter.
 - **Insufficient pipeline depth**: increase `--pipeline` (default 32 batches)
@@ -36,7 +32,7 @@ fall behind:
 Use `daq bench` to test raw USB ingest throughput without any file I/O:
 
 ```sh
-daq bench --channels 0-7 --rate 200000 --duration 10
+daq bench --channels analog --rate 200k --duration 10
 ```
 
 If `daq bench` succeeds but `daq capture` overruns, the bottleneck is in file
@@ -60,7 +56,7 @@ overrun occurred.
 ## Tuning Checklist
 
 1. Use a local SSD, not a network volume.
-2. Use `daq capture`, not `daq analog scan`, for sustained recording.
+2. Use `daq capture` for sustained recording to disk.
 3. Increase `--buffer-size` if you see intermittent overruns (disk jitter).
 4. Increase `--pipeline` if the application side is not keeping up.
 5. Run `daq bench` to isolate USB read speed from file writing.

@@ -104,10 +104,10 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 	copy(frameData[4:8], wire.PutUint32LE(262143)) // max
 
 	mock := transport.NewMockTransport(
-		transport.MockResponse{},              // ADC setup
-		transport.MockResponse{},              // scan queue config
-		transport.MockResponse{},              // clear FIFO
-		transport.MockResponse{},              // scan start
+		transport.MockResponse{},                // ADC setup
+		transport.MockResponse{},                // scan queue config
+		transport.MockResponse{},                // clear FIFO
+		transport.MockResponse{},                // scan start
 		transport.MockResponse{Data: frameData}, // first bulk read
 		transport.MockResponse{Data: frameData}, // second bulk read
 		transport.MockResponse{Data: frameData}, // third bulk read

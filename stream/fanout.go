@@ -79,10 +79,9 @@ func (f *Fanout) SetErr(err error) {
 	f.mu.Unlock()
 }
 
-// Stop signals all subscribers that broadcast has ended.
-// It does not close the source channel (the producer owns that).
-func (f *Fanout) Stop() {
-	// Wait for Run to finish (source must close for Run to exit).
+// AwaitDone blocks until Run exits. Run exits when the source channel is
+// closed by the producer; this method does not signal Run to stop.
+func (f *Fanout) AwaitDone() {
 	<-f.done
 }
 
