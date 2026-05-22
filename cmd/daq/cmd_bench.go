@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -82,11 +83,13 @@ func (b *benchCmd) Run(app *cli) error {
 	}()
 
 	// Temp directory for capture writer (measures real write overhead).
-	dir, err := os.MkdirTemp("", "bench-capture-*")
+	tmpDir, err := os.MkdirTemp("", "bench-capture-*")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	defer os.RemoveAll(tmpDir)
+
+	dir := filepath.Join(tmpDir, "data")
 
 	nCh := len(channels)
 	h := capture.Header{
