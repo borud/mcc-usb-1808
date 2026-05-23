@@ -13,8 +13,8 @@ var ErrNoChannels = errors.New("codec: no channels")
 
 // Decoder decodes raw scan chunks into frames and typed values.
 type Decoder struct {
-	channels  []device.ChannelConfig
-	coeffs    []voltCoeff
+	channels []device.ChannelConfig
+	coeffs   []voltCoeff
 	// frameSize is the number of bytes per frame.
 	frameSize int
 	buf       []float64
