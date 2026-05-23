@@ -24,22 +24,22 @@ type Device struct {
 	initialized atomic.Bool
 }
 
-// DeviceInfo describes a discovered USB-1808/1808X device.
-type DeviceInfo struct {
+// Info describes a discovered USB-1808/1808X device.
+type Info struct {
 	Model   Model
 	Bus     uint8
 	Address uint8
 }
 
 // Discover returns all connected USB-1808/1808X devices.
-func Discover() ([]DeviceInfo, error) {
+func Discover() ([]Info, error) {
 	infos, err := transport.Discover(VendorID, []uint16{PID1808, PID1808X})
 	if err != nil {
 		return nil, err
 	}
-	result := make([]DeviceInfo, len(infos))
+	result := make([]Info, len(infos))
 	for i, info := range infos {
-		result[i] = DeviceInfo{
+		result[i] = Info{
 			Model:   Model(info.ProductID),
 			Bus:     info.Bus,
 			Address: info.Address,
