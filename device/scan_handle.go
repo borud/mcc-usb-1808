@@ -305,3 +305,24 @@ func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 		}
 	}
 }
+
+// ringStageSize computes the buffer size in bytes for each async ring transfer.
+// Targets ~10ms of data, aligned to MaxPacketSize, capped at ringMaxStageSize.
+func ringStageSize(rate float64, nChannels int) int {
+	// 10ms of data (in scans)
+	n := max(int(rate*0.01), 1)
+
+	bytesPerScan := nChannels * 4
+	totalBytes := min(n*bytesPerScan, ringMaxStageSize)
+
+	if totalBytes >= MaxPacketSize {
+		totalBytes = (totalBytes / MaxPacketSize) * MaxPacketSize
+	}
+
+	if totalBytes < MaxPacketSize {
+		totalBytes = MaxPacketSize
+	}
+
+	totalBytes = max((totalBytes/bytesPerScan)*bytesPerScan, bytesPerScan)
+	return totalBytes
+}
