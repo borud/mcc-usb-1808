@@ -37,16 +37,13 @@ func NewHeader(dev *device.Device, cfg device.ScanConfig) (Header, error) {
 	for i, ch := range cfg.Channels {
 		cc := Channel{
 			Index: ch.Index,
-			Type:  ChannelTypeFromDevice(ch.Type),
+			Type:  ch.Type,
 			Name:  scanChanNames[ch.Index],
 		}
 		if ch.Type == device.ChannelTypeAnalog {
-			cc.Range = uint8(ch.Range)
+			cc.Range = ch.Range
 			cal := calTable[ch.Index][ch.Range]
-			cc.Cal = &CalEntry{
-				Slope:  cal.Slope,
-				Offset: cal.Offset,
-			}
+			cc.Cal = &cal
 		}
 		channels[i] = cc
 	}

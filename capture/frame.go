@@ -46,9 +46,8 @@ func (f *Frame) Values() []float64 {
 // channel's calibration entry and voltage range. Non-analog channels and
 // channels without calibration data are returned as float64(raw).
 func calibrate(raw uint32, ch Channel) float64 {
-	if ch.Type != AnalogIn || ch.Cal == nil {
+	if ch.Type != device.ChannelTypeAnalog || ch.Cal == nil {
 		return float64(raw)
 	}
-	cal := device.Calibration{Slope: ch.Cal.Slope, Offset: ch.Cal.Offset}
-	return cal.ToVolts(raw, device.Range(ch.Range))
+	return ch.Cal.ToVolts(raw, ch.Range)
 }

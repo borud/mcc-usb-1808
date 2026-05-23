@@ -46,9 +46,9 @@ header := capture.Header{
     DeviceModel:  "USB-1808X",
     DeviceSerial: "01A2B3C4",
     Channels: []capture.Channel{
-        {Index: 0, Type: capture.AnalogIn, Range: 0, Name: "sensor",
-            Cal: &capture.CalEntry{Slope: 1.0, Offset: 0.0}},
-        {Index: 1, Type: capture.AnalogIn, Range: 0, Name: "ref"},
+        {Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V, Name: "sensor",
+            Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}},
+        {Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V, Name: "ref"},
     },
     SampleRate: 10000,
     Format:     capture.RawUint32,

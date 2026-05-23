@@ -11,6 +11,7 @@ import (
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
 	"github.com/borud/mcc-usb-1808/v4/capture/export"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 type fileCmd struct {
@@ -59,9 +60,9 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 		if label == "" {
 			label = fmt.Sprintf("ch%d", i)
 		}
-		line := fmt.Sprintf("  [%d] %-12s %s", ch.Index, label, channelTypeName(ch.Type))
-		if ch.Type == capture.AnalogIn {
-			line += fmt.Sprintf("  range=%s", rangeName(ch.Range))
+		line := fmt.Sprintf("  [%d] %-12s %s", ch.Index, label, ch.Type)
+		if ch.Type == device.ChannelTypeAnalog {
+			line += fmt.Sprintf("  range=%s", ch.Range)
 		}
 		if ch.Cal != nil {
 			line += fmt.Sprintf("  cal: slope=%g, offset=%g", ch.Cal.Slope, ch.Cal.Offset)
@@ -284,32 +285,3 @@ func formatName(f capture.DataFormat) string {
 	}
 }
 
-func channelTypeName(t capture.ChannelType) string {
-	switch t {
-	case capture.AnalogIn:
-		return "AnalogIn"
-	case capture.DigitalIO:
-		return "DigitalIO"
-	case capture.Counter:
-		return "Counter"
-	case capture.Encoder:
-		return "Encoder"
-	default:
-		return fmt.Sprintf("unknown(%d)", t)
-	}
-}
-
-func rangeName(r uint8) string {
-	switch r {
-	case 0:
-		return "BP10V"
-	case 1:
-		return "BP5V"
-	case 2:
-		return "UP10V"
-	case 3:
-		return "UP5V"
-	default:
-		return fmt.Sprintf("range(%d)", r)
-	}
-}

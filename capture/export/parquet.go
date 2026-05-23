@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/device"
 	pq "github.com/parquet-go/parquet-go"
 )
 
@@ -144,7 +145,7 @@ type parquetColumn struct {
 	Role            string              `json:"role"`
 	ChannelPosition int                 `json:"channel_position"`
 	ChannelIndex    int                 `json:"channel_index"`
-	ChannelType     capture.ChannelType `json:"channel_type"`
+	ChannelType     device.ChannelType `json:"channel_type"`
 	OriginalName    string              `json:"original_name,omitempty"`
 	Unit            string              `json:"unit,omitempty"`
 	columnIndex     int
@@ -185,7 +186,7 @@ func parquetSchema(h capture.Header, includeRaw bool) (*pq.Schema, []parquetColu
 	names := columnNames(h.Channels)
 	for i, ch := range h.Channels {
 		unit := ""
-		if ch.Type == capture.AnalogIn {
+		if ch.Type == device.ChannelTypeAnalog {
 			unit = "V"
 		}
 		columns = append(columns, addField(names[i], pq.Leaf(pq.DoubleType), parquetColumn{

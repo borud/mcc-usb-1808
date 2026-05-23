@@ -37,9 +37,9 @@ func testHeader() capture.Header {
 		DeviceSerial: "12345678",
 		FPGAVersion:  "1.5",
 		Channels: []capture.Channel{
-			{Index: 0, Type: capture.AnalogIn, Range: 0, Name: "voltage",
-				Cal: &capture.CalEntry{Slope: 1.0, Offset: 0.0}},
-			{Index: 8, Type: capture.DigitalIO, Name: "trigger"},
+			{Index: 0, Type: device.ChannelTypeAnalog, Range: 0, Name: "voltage",
+				Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}},
+			{Index: 8, Type: device.ChannelTypeDIO, Name: "trigger"},
 		},
 		SampleRate:      1000,
 		Format:          capture.RawUint32,

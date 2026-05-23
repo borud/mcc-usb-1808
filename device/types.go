@@ -133,8 +133,8 @@ type ChannelConfig struct {
 
 // Calibration holds a single calibration coefficient pair read from EEPROM.
 type Calibration struct {
-	Slope  float32
-	Offset float32
+	Slope  float32 `json:"slope"`
+	Offset float32 `json:"offset"`
 }
 
 // ToVolts converts a raw 18-bit ADC value to voltage using these calibration

@@ -18,9 +18,9 @@ func testHeaderRaw(channels int) Header {
 	for i := range chs {
 		chs[i] = Channel{
 			Index: i,
-			Type:  AnalogIn,
+			Type:  device.ChannelTypeAnalog,
 			Range: 0, // BP10V
-			Cal:   &CalEntry{Slope: 1.0, Offset: 0.0},
+			Cal:   &device.Calibration{Slope: 1.0, Offset: 0.0},
 		}
 	}
 	return Header{
@@ -42,11 +42,11 @@ func testHeaderMixed() Header {
 		FPGAVersion:     "2.0",
 		CalibrationDate: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
 		Channels: []Channel{
-			{Index: 0, Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}},
-			{Index: 1, Type: AnalogIn, Range: 1, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}},
-			{Index: 8, Type: DigitalIO},
-			{Index: 9, Type: Counter},
-			{Index: 11, Type: Encoder},
+			{Index: 0, Type: device.ChannelTypeAnalog, Range: 0, Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}},
+			{Index: 1, Type: device.ChannelTypeAnalog, Range: 1, Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}},
+			{Index: 8, Type: device.ChannelTypeDIO},
+			{Index: 9, Type: device.ChannelTypeCounter},
+			{Index: 11, Type: device.ChannelTypeEncoder},
 		},
 		SampleRate:      10000,
 		Format:          RawUint32,
@@ -704,7 +704,7 @@ func TestSegmentFilter_InvalidSegment(t *testing.T) {
 // Calibration tests — these don't depend on Writer/Reader API changes.
 
 func TestCalibrate_BP10V(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 0, Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}}
 
 	got := calibrate(device.ADCMidscale, ch)
 	if got != 0.0 {
@@ -724,7 +724,7 @@ func TestCalibrate_BP10V(t *testing.T) {
 }
 
 func TestCalibrate_BP5V(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 1, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 1, Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}}
 
 	got := calibrate(device.ADCMidscale, ch)
 	if got != 0.0 {
@@ -738,7 +738,7 @@ func TestCalibrate_BP5V(t *testing.T) {
 }
 
 func TestCalibrate_UP10V(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 2, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 2, Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}}
 
 	got := calibrate(0, ch)
 	if got != 0.0 {
@@ -752,7 +752,7 @@ func TestCalibrate_UP10V(t *testing.T) {
 }
 
 func TestCalibrate_UP5V(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 3, Cal: &CalEntry{Slope: 1.0, Offset: 0.0}}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 3, Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}}
 
 	got := calibrate(0x3FFFF, ch)
 	if math.Abs(got-5.0) > 1e-6 {
@@ -761,7 +761,7 @@ func TestCalibrate_UP5V(t *testing.T) {
 }
 
 func TestCalibrate_WithSlopeOffset(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 0, Cal: &CalEntry{Slope: 1.0005, Offset: 10.0}}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 0, Cal: &device.Calibration{Slope: 1.0005, Offset: 10.0}}
 
 	raw := uint32(device.ADCMidscale)
 	cal := float64(raw)*float64(ch.Cal.Slope) + float64(ch.Cal.Offset)
@@ -775,7 +775,7 @@ func TestCalibrate_WithSlopeOffset(t *testing.T) {
 }
 
 func TestCalibrate_NonAnalogPassthrough(t *testing.T) {
-	for _, ct := range []ChannelType{DigitalIO, Counter, Encoder} {
+	for _, ct := range []device.ChannelType{device.ChannelTypeDIO, device.ChannelTypeCounter, device.ChannelTypeEncoder} {
 		ch := Channel{Type: ct}
 		raw := uint32(42)
 		got := calibrate(raw, ch)
@@ -786,7 +786,7 @@ func TestCalibrate_NonAnalogPassthrough(t *testing.T) {
 }
 
 func TestCalibrate_NilCal(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 0, Cal: nil}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 0, Cal: nil}
 	got := calibrate(1000, ch)
 	if got != 1000.0 {
 		t.Errorf("nil cal: got %f, want 1000.0", got)
@@ -794,7 +794,7 @@ func TestCalibrate_NilCal(t *testing.T) {
 }
 
 func TestCalibrate_UnipolarClamp(t *testing.T) {
-	ch := Channel{Type: AnalogIn, Range: 2, Cal: &CalEntry{Slope: 1.0, Offset: -1000.0}}
+	ch := Channel{Type: device.ChannelTypeAnalog, Range: 2, Cal: &device.Calibration{Slope: 1.0, Offset: -1000.0}}
 	got := calibrate(100, ch)
 	if got != 0.0 {
 		t.Errorf("unipolar clamp low: got %f, want 0.0", got)
@@ -1111,12 +1111,12 @@ func TestHeader_RoundTrip(t *testing.T) {
 }
 
 // channelTypes maps hardware indices to channel types.
-var channelTypes = [13]ChannelType{
-	AnalogIn, AnalogIn, AnalogIn, AnalogIn,
-	AnalogIn, AnalogIn, AnalogIn, AnalogIn,
-	DigitalIO,
-	Counter, Counter,
-	Encoder, Encoder,
+var channelTypes = [13]device.ChannelType{
+	device.ChannelTypeAnalog, device.ChannelTypeAnalog, device.ChannelTypeAnalog, device.ChannelTypeAnalog,
+	device.ChannelTypeAnalog, device.ChannelTypeAnalog, device.ChannelTypeAnalog, device.ChannelTypeAnalog,
+	device.ChannelTypeDIO,
+	device.ChannelTypeCounter, device.ChannelTypeCounter,
+	device.ChannelTypeEncoder, device.ChannelTypeEncoder,
 }
 
 func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float64) Header {
@@ -1128,9 +1128,8 @@ func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float6
 			Type:  channelTypes[idx],
 		}
 		if idx < 8 {
-			r := ranges[analogIdx]
-			ch.Range = r
-			ch.Cal = &CalEntry{
+			ch.Range = device.Range(ranges[analogIdx])
+			ch.Cal = &device.Calibration{
 				Slope:  1.0 + float32(idx)*0.0001,
 				Offset: float32(idx) * 0.5,
 			}
@@ -1288,9 +1287,9 @@ func FuzzCalibrate(f *testing.F) {
 
 		raw &= 0x3FFFF
 		ch := Channel{
-			Type:  AnalogIn,
-			Range: rng,
-			Cal:   &CalEntry{Slope: slope, Offset: offset},
+			Type:  device.ChannelTypeAnalog,
+			Range: device.Range(rng),
+			Cal:   &device.Calibration{Slope: slope, Offset: offset},
 		}
 
 		v := calibrate(raw, ch)

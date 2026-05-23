@@ -58,7 +58,7 @@ func WAV(w io.Writer, r *capture.Reader) error {
 	// For other channels, use the 18-bit full-scale value.
 	scales := make([]float64, numCh)
 	for i, ch := range h.Channels {
-		if ch.Type != capture.AnalogIn {
+		if ch.Type != device.ChannelTypeAnalog {
 			scales[i] = device.ADCMaxCode
 			continue
 		}
