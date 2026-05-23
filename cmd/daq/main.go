@@ -19,7 +19,10 @@ type cli struct {
 	LogLevel  string `help:"Log level (${enum})." default:"info" enum:"debug,info,warn,error"`
 	LogFormat string `help:"Log format (${enum})." default:"text" enum:"text,json"`
 	Model     string `help:"Force device model (1808,1808x)." default:"" enum:",1808,1808x"`
+	Bus       int    `help:"USB bus number (use with --addr to select device)." default:"-1"`
+	Addr      int    `help:"USB device address (use with --bus to select device)." default:"-1"`
 
+	List    listCmd    `cmd:"" help:"List connected devices."`
 	Info    infoCmd    `cmd:"" help:"Show device information."`
 	Status  statusCmd  `cmd:"" help:"Show device status."`
 	Reset   resetCmd   `cmd:"" help:"Reset the device."`
@@ -77,13 +80,20 @@ func setupLogger(level, format string) *slog.Logger {
 func openDevice(app *cli) (*device.Device, error) {
 	var dev *device.Device
 	var err error
-	switch app.Model {
-	case "1808":
-		dev, err = device.OpenModel(device.USB1808)
-	case "1808x":
-		dev, err = device.OpenModel(device.USB1808X)
-	default:
-		dev, err = device.Open()
+
+	if app.Bus >= 0 && app.Addr >= 0 {
+		dev, err = device.OpenAt(uint8(app.Bus), uint8(app.Addr))
+	} else if app.Bus >= 0 || app.Addr >= 0 {
+		return nil, fmt.Errorf("--bus and --addr must be specified together")
+	} else {
+		switch app.Model {
+		case "1808":
+			dev, err = device.OpenModel(device.USB1808)
+		case "1808x":
+			dev, err = device.OpenModel(device.USB1808X)
+		default:
+			dev, err = device.Open()
+		}
 	}
 	if err != nil {
 		return nil, err

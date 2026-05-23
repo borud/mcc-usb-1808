@@ -21,6 +21,97 @@ type LibUSBTransport struct {
 	mu     sync.Mutex
 }
 
+// Discover returns all connected USB devices matching any of the given product IDs.
+func Discover(vendorID uint16, productIDs []uint16) ([]DeviceInfo, error) {
+	var ctx *C.libusb_context
+	if rc := C.libusb_init(&ctx); rc != 0 {
+		return nil, fmt.Errorf("libusb_init: %s", C.GoString(C.libusb_strerror(rc)))
+	}
+	defer C.libusb_exit(ctx)
+
+	var list **C.libusb_device
+	n := C.libusb_get_device_list(ctx, &list)
+	if n < 0 {
+		return nil, fmt.Errorf("libusb_get_device_list: %s", C.GoString(C.libusb_strerror(C.int(n))))
+	}
+	defer C.libusb_free_device_list(list, 1)
+
+	pidSet := make(map[uint16]bool, len(productIDs))
+	for _, pid := range productIDs {
+		pidSet[pid] = true
+	}
+
+	devices := unsafe.Slice(list, int(n))
+	var result []DeviceInfo
+	for _, dev := range devices {
+		var desc C.struct_libusb_device_descriptor
+		if C.libusb_get_device_descriptor(dev, &desc) != 0 {
+			continue
+		}
+		vid := uint16(desc.idVendor)
+		pid := uint16(desc.idProduct)
+		if vid != vendorID || !pidSet[pid] {
+			continue
+		}
+		result = append(result, DeviceInfo{
+			VendorID:  vid,
+			ProductID: pid,
+			Bus:       uint8(C.libusb_get_bus_number(dev)),
+			Address:   uint8(C.libusb_get_device_address(dev)),
+		})
+	}
+	return result, nil
+}
+
+// OpenLibUSBAt opens a USB device at a specific bus and address.
+func OpenLibUSBAt(vendorID uint16, bus, addr uint8) (*LibUSBTransport, error) {
+	var ctx *C.libusb_context
+	if rc := C.libusb_init(&ctx); rc != 0 {
+		return nil, fmt.Errorf("libusb_init: %s", C.GoString(C.libusb_strerror(rc)))
+	}
+
+	var list **C.libusb_device
+	n := C.libusb_get_device_list(ctx, &list)
+	if n < 0 {
+		C.libusb_exit(ctx)
+		return nil, fmt.Errorf("libusb_get_device_list: %s", C.GoString(C.libusb_strerror(C.int(n))))
+	}
+	defer C.libusb_free_device_list(list, 1)
+
+	devices := unsafe.Slice(list, int(n))
+	for _, dev := range devices {
+		if C.libusb_get_bus_number(dev) != C.uint8_t(bus) ||
+			C.libusb_get_device_address(dev) != C.uint8_t(addr) {
+			continue
+		}
+		var desc C.struct_libusb_device_descriptor
+		if C.libusb_get_device_descriptor(dev, &desc) != 0 {
+			continue
+		}
+		if uint16(desc.idVendor) != vendorID {
+			continue
+		}
+
+		var handle *C.libusb_device_handle
+		if rc := C.libusb_open(dev, &handle); rc != 0 {
+			C.libusb_exit(ctx)
+			return nil, fmt.Errorf("libusb_open: %s", C.GoString(C.libusb_strerror(rc)))
+		}
+		if C.libusb_kernel_driver_active(handle, 0) == 1 {
+			C.libusb_detach_kernel_driver(handle, 0)
+		}
+		if rc := C.libusb_claim_interface(handle, 0); rc != 0 {
+			C.libusb_close(handle)
+			C.libusb_exit(ctx)
+			return nil, fmt.Errorf("libusb_claim_interface: %s", C.GoString(C.libusb_strerror(rc)))
+		}
+		return &LibUSBTransport{ctx: ctx, handle: handle}, nil
+	}
+
+	C.libusb_exit(ctx)
+	return nil, fmt.Errorf("device not found at bus %d address %d", bus, addr)
+}
+
 // OpenLibUSB opens a USB device by vendor and product ID.
 func OpenLibUSB(vendorID, productID uint16) (*LibUSBTransport, error) {
 	var ctx *C.libusb_context
