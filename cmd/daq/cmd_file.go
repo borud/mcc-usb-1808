@@ -35,7 +35,7 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 
 	// Aggregate overview.
 	fmt.Printf("Directory:       %s\n", c.Dir)
-	fmt.Printf("Format:          %s\n", formatName(h.Format))
+	fmt.Printf("Format:          RawUint32 (4 bytes/sample, little-endian)\n")
 	if h.FrameCount > 0 {
 		fmt.Printf("Frame count:     %d\n", h.FrameCount)
 		dur := float64(h.FrameCount) / h.SampleRate
@@ -276,12 +276,4 @@ func humanBytes(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func formatName(f capture.DataFormat) string {
-	switch f {
-	case capture.RawUint32:
-		return "RawUint32 (4 bytes/sample, little-endian)"
-	default:
-		return fmt.Sprintf("unknown(%d)", f)
-	}
-}
 

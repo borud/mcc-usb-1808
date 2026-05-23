@@ -42,7 +42,6 @@ func testHeader() capture.Header {
 			{Index: 8, Type: device.ChannelTypeDIO, Name: "trigger"},
 		},
 		SampleRate:      1000,
-		Format:          capture.RawUint32,
 		Timestamp:       1700000000000,
 		SessionID:       "test-session",
 		Operator:        "test-operator",

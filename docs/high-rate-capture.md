@@ -5,7 +5,7 @@ particularly when encountering FIFO overruns (`ErrScanOverrun`).
 
 ## How Capture Works
 
-`daq capture` always writes raw ADC codes in `RawUint32` format. Calibration
+`daq capture` always writes raw ADC codes as little-endian uint32. Calibration
 is not applied during capture -- it is applied later when reading or exporting
 the capture file. This keeps the write path fast and allocation-free.
 

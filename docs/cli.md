@@ -92,7 +92,7 @@ daq cal table --output aout --format csv
 ## capture
 
 Capture scan data to a binary capture directory. Capture always writes raw ADC
-codes (`RawUint32` format); calibration is applied when reading or exporting.
+codes; calibration is applied when reading or exporting.
 
 ```sh
 daq capture --channels analog --rate 10k

@@ -30,7 +30,6 @@ func testHeaderRaw(channels int) Header {
 		CalibrationDate: time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC),
 		Channels:        chs,
 		SampleRate:      1000,
-		Format:          RawUint32,
 		Timestamp:       time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli(),
 	}
 }
@@ -49,7 +48,6 @@ func testHeaderMixed() Header {
 			{Index: 11, Type: device.ChannelTypeEncoder},
 		},
 		SampleRate:      10000,
-		Format:          RawUint32,
 		Timestamp:       time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC).UnixMilli(),
 		ApplicationName: "daq-capture",
 		SessionID:       "run-042",
@@ -113,19 +111,10 @@ func testCapture(t *testing.T, h Header, frames [][]uint32, opts ...WriterOption
 }
 
 func TestNewWriter_NoChannels(t *testing.T) {
-	h := Header{Format: RawUint32}
+	h := Header{}
 	_, err := NewWriter(filepath.Join(t.TempDir(), "capture"), h)
 	if !errors.Is(err, ErrNoChannels) {
 		t.Fatalf("expected ErrNoChannels, got %v", err)
-	}
-}
-
-func TestNewWriter_InvalidFormat(t *testing.T) {
-	h := testHeaderRaw(2)
-	h.Format = DataFormat(99)
-	_, err := NewWriter(filepath.Join(t.TempDir(), "capture"), h)
-	if !errors.Is(err, ErrInvalidFormat) {
-		t.Fatalf("expected ErrInvalidFormat, got %v", err)
 	}
 }
 
@@ -245,9 +234,6 @@ func TestRoundTrip_RawUint32(t *testing.T) {
 	rh := r.Header()
 	if rh.DeviceModel != h.DeviceModel {
 		t.Errorf("model = %q, want %q", rh.DeviceModel, h.DeviceModel)
-	}
-	if rh.Format != RawUint32 {
-		t.Errorf("format = %d, want RawUint32", rh.Format)
 	}
 	if len(rh.Channels) != numCh {
 		t.Fatalf("channels = %d, want %d", len(rh.Channels), numCh)
@@ -1062,9 +1048,6 @@ func TestHeader_RoundTrip(t *testing.T) {
 	if rh.SampleRate != h.SampleRate {
 		t.Errorf("SampleRate = %f, want %f", rh.SampleRate, h.SampleRate)
 	}
-	if rh.Format != h.Format {
-		t.Errorf("Format = %d, want %d", rh.Format, h.Format)
-	}
 	if rh.Timestamp != h.Timestamp {
 		t.Errorf("Timestamp = %d, want %d", rh.Timestamp, h.Timestamp)
 	}
@@ -1119,7 +1102,7 @@ var channelTypes = [13]device.ChannelType{
 	device.ChannelTypeEncoder, device.ChannelTypeEncoder,
 }
 
-func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float64) Header {
+func buildFuzzHeader(queue []int, ranges []uint8, rate float64) Header {
 	channels := make([]Channel, len(queue))
 	analogIdx := 0
 	for i, idx := range queue {
@@ -1143,7 +1126,6 @@ func buildFuzzHeader(queue []int, ranges []uint8, format DataFormat, rate float6
 		FPGAVersion:  "2.0",
 		Channels:     channels,
 		SampleRate:   rate,
-		Format:       format,
 		Timestamp:    1700000000000,
 		SessionID:    "fuzz-session",
 	}
@@ -1185,7 +1167,7 @@ func FuzzCaptureRaw(f *testing.F) {
 			}
 		}
 
-		h := buildFuzzHeader(queue, ranges, RawUint32, 10000)
+		h := buildFuzzHeader(queue, ranges, 10000)
 		nCh := len(queue)
 
 		dir := filepath.Join(t.TempDir(), "capture")
@@ -1333,7 +1315,7 @@ func FuzzCaptureSeekable(f *testing.F) {
 			queue = append(queue, i%13)
 		}
 
-		h := buildFuzzHeader(queue, make([]uint8, nCh), RawUint32, 48000)
+		h := buildFuzzHeader(queue, make([]uint8, nCh), 48000)
 
 		dir := filepath.Join(t.TempDir(), "capture")
 		w, err := NewWriter(dir, h)

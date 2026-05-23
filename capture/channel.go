@@ -12,6 +12,6 @@ type Channel struct {
 	Range device.Range `json:"range,omitempty"`
 	// Name is an optional human-readable label.
 	Name string `json:"name,omitempty"`
-	// Cal holds calibration coefficients. Analog + RawUint32 only.
+	// Cal holds calibration coefficients for analog channels.
 	Cal *device.Calibration `json:"cal,omitempty"`
 }

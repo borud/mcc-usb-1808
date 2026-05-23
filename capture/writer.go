@@ -80,7 +80,6 @@ type Writer struct {
 // rotation.
 //
 // Returns [ErrNoChannels] if h.Channels is empty.
-// Returns [ErrInvalidFormat] if h.Format is not [RawUint32].
 func NewWriter(dir string, h Header, opts ...WriterOption) (*Writer, error) {
 
 	cfg := writerConfig{
@@ -104,10 +103,6 @@ func NewWriter(dir string, h Header, opts ...WriterOption) (*Writer, error) {
 
 	if len(h.Channels) == 0 {
 		return nil, ErrNoChannels
-	}
-
-	if h.Format != RawUint32 {
-		return nil, ErrInvalidFormat
 	}
 
 	const sampleBytes = 4

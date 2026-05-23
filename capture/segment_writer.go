@@ -27,10 +27,6 @@ func newSegmentWriter(pendingPath, finalPath string, h Header, seq uint16, globa
 	if len(h.Channels) == 0 {
 		return nil, ErrNoChannels
 	}
-	if h.Format != RawUint32 {
-		return nil, ErrInvalidFormat
-	}
-
 	const sampleBytes = 4
 	frameSize := len(h.Channels) * sampleBytes
 

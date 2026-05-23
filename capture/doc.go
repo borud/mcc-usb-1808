@@ -9,9 +9,9 @@
 //	  seg_0001.daq
 //	  seg_0002.daq
 //
-// New captures use [RawUint32] (4 bytes per sample, raw 18-bit ADC / counter /
-// digital values). The legacy [calibratedFloat64] format (8 bytes per sample) is
-// supported for reading older files but rejected by [NewWriter].
+// Samples are 4 bytes each (little-endian uint32): raw 18-bit ADC codes for
+// analog inputs, native uint32 values for counters and digital ports.
+// Calibration coefficients in the header convert analog values to voltages.
 //
 // # Segment file layout
 //

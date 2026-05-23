@@ -55,7 +55,6 @@ func NewHeader(dev *device.Device, cfg device.ScanConfig) (Header, error) {
 		CalibrationDate: calDate,
 		Channels:        channels,
 		SampleRate:      float64(cfg.Rate),
-		Format:          RawUint32,
 		Timestamp:       time.Now().UnixMilli(),
 	}, nil
 }
@@ -74,7 +73,6 @@ type Header struct {
 	Channels []Channel `json:"channels"`
 	// SampleRate is the sample rate in Hz per channel.
 	SampleRate float64 `json:"sample_rate"`
-	Format     DataFormat `json:"format"`
 	// FrameCount is stored in the binary preamble, not in JSON. 0 = unknown.
 	FrameCount uint64 `json:"-"`
 

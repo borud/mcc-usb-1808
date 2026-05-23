@@ -24,11 +24,6 @@ var (
 	// slice.
 	ErrNoChannels = errors.New("capture: header has no channels")
 
-	// ErrInvalidFormat is returned when a [Header.Format] value is not
-	// recognized, or when a write method is called that does not match
-	// the writer's configured format.
-	ErrInvalidFormat = errors.New("capture: invalid data format for this operation")
-
 	// ErrNotDirectory is returned by [NewReader] when the path is not
 	// a directory.
 	ErrNotDirectory = errors.New("capture: path is not a directory")

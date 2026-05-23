@@ -95,7 +95,6 @@ func (b *benchCmd) Run(app *cli) error {
 	h := capture.Header{
 		Channels:   make([]capture.Channel, nCh),
 		SampleRate: float64(rate),
-		Format:     capture.RawUint32,
 	}
 	for i, ch := range channels {
 		h.Channels[i] = capture.Channel{Index: ch.Index, Type: device.ChannelTypeAnalog}

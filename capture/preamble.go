@@ -106,13 +106,3 @@ func ReadSegmentInfo(path string) (SegmentInfo, error) {
 	}, nil
 }
 
-func sampleSize(f DataFormat) (int, error) {
-	switch f {
-	case RawUint32:
-		return 4, nil
-	case calibratedFloat64:
-		return 8, nil
-	default:
-		return 0, ErrInvalidFormat
-	}
-}
