@@ -50,3 +50,11 @@ type BulkRing interface {
 type AsyncBulkReader interface {
 	NewBulkRing(endpoint uint8, bufSize, count, depth int, timeoutMs uint) (BulkRing, error)
 }
+
+// DeviceInfo describes a discovered USB device before it is opened.
+type DeviceInfo struct {
+	VendorID  uint16
+	ProductID uint16
+	Bus       uint8
+	Address   uint8
+}
