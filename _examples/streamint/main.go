@@ -105,8 +105,13 @@ func main() {
 
 	fanout.AwaitDone()
 
-	slog.Info("disk dropped", "chunks", disk.Dropped())
-	slog.Info("live dropped", "chunks", live.Dropped())
-	slog.Info("total", "frames", totalFrames, "chunks", totalChunks)
+	liveReceived := totalChunks
+	liveDropped := live.Dropped()
+	diskDropped := disk.Dropped()
+	sourceChunks := liveReceived + int64(liveDropped)
+
+	slog.Info("source", "chunks", sourceChunks)
+	slog.Info("disk", "dropped", diskDropped)
+	slog.Info("live", "received", liveReceived, "dropped", liveDropped, "frames", totalFrames)
 
 }
