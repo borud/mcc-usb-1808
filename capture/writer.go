@@ -61,16 +61,17 @@ func WithFileSize(bytes int) WriterOption {
 //
 // Writer is NOT safe for concurrent use.
 type Writer struct {
-	dir         string
-	header      Header
-	frameSize   int
-	maxFrames   uint64
-	bufFrames   int
-	current     *segmentWriter
-	next        *segmentWriter
-	seq         uint16
-	totalFrames uint64
-	closed      bool
+	dir          string
+	header       Header
+	frameSize    int
+	maxFrames    uint64
+	bufFrames    int
+	current      *segmentWriter
+	next         *segmentWriter
+	seq          uint16
+	totalFrames  uint64
+	overrunCount int
+	closed       bool
 }
 
 // NewWriter creates a Writer that writes segmented capture data to dir.
@@ -203,6 +204,21 @@ func (w *Writer) Close() error {
 		return err
 	}
 	return nextErr
+}
+
+// RecordOverrun records a FIFO overrun event. The event is attached to the
+// current segment and will be written as a trailer when the segment closes.
+func (w *Writer) RecordOverrun(e OverrunEvent) {
+	if w.closed {
+		return
+	}
+	w.current.addOverrun(e)
+	w.overrunCount++
+}
+
+// OverrunCount returns the total number of overrun events recorded.
+func (w *Writer) OverrunCount() int {
+	return w.overrunCount
 }
 
 // FramesWritten returns the total number of frames written across all

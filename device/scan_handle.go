@@ -46,6 +46,11 @@ type ScanHandle struct {
 	mu        sync.Mutex
 	state     scanState
 	stopOnce  sync.Once
+
+	// Saved for scan restart after overrun.
+	ar      transport.AsyncBulkReader
+	payload []byte
+	bufSize int
 }
 
 // CreateScan configures the hardware for scanning and returns a handle.
@@ -228,14 +233,33 @@ func (h *ScanHandle) startAsync(ar transport.AsyncBulkReader) error {
 		return err
 	}
 
+	// Save for restart after overrun.
+	h.ar = ar
+	h.payload = payload
+	h.bufSize = bufSize
+
 	go h.runAsyncReader(ring)
 	return nil
 }
 
+// drainResult indicates why drainRing returned.
+type drainResult int
+
+const (
+	drainCompleted drainResult = iota
+	drainStopped
+	drainFatalError
+	drainOverrun
+)
+
+// maxOverrunsPerSecond is the safety valve: if this many consecutive overruns
+// happen within one second, the scan is terminated to avoid an infinite
+// restart loop.
+const maxOverrunsPerSecond = 3
+
 func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 	defer close(h.done)
 	defer close(h.chunks)
-	defer ring.Stop()
 	defer func() {
 		h.stopOnce.Do(func() { close(h.stop) })
 	}()
@@ -243,7 +267,9 @@ func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 	total := h.count
 	var framesRead uint32
 
-	// Monitor for stop signal.
+	// Monitor for stop signal. We don't capture ring by closure since it
+	// may be replaced on overrun recovery. Instead, the monitor issues the
+	// stop command and the drainRing loop detects it via h.stop.
 	go func() {
 		<-h.stop
 		h.dev.mu.Lock()
@@ -252,7 +278,7 @@ func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 		ring.Stop()
 	}()
 
-	// Watchdog for finite scans (same rationale as runSyncReaders).
+	// Watchdog for finite scans.
 	if h.count > 0 {
 		expected := time.Duration(float64(h.count) / float64(h.rate) * float64(time.Second))
 		watchdog := time.AfterFunc(expected+5*time.Second, func() {
@@ -261,26 +287,83 @@ func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 		defer watchdog.Stop()
 	}
 
+	// Safety valve state.
+	var recentOverruns int
+	var firstOverrunTime time.Time
+
+	for {
+		reason := h.drainRing(ring, &framesRead, total)
+		switch reason {
+		case drainCompleted, drainStopped, drainFatalError:
+			ring.Stop()
+			return
+		case drainOverrun:
+			// Ring is already stopped by drainRing.
+			now := time.Now()
+
+			// Safety valve: too many overruns in rapid succession.
+			if recentOverruns > 0 && now.Sub(firstOverrunTime) < time.Second {
+				recentOverruns++
+				if recentOverruns >= maxOverrunsPerSecond {
+					h.setErr(fmt.Errorf("%w: %d overruns in %v", ErrScanOverrun,
+						recentOverruns, now.Sub(firstOverrunTime)))
+					return
+				}
+			} else {
+				recentOverruns = 1
+				firstOverrunTime = now
+			}
+
+			// Fire overrun callback.
+			if h.opts.onOverrun != nil {
+				h.opts.onOverrun(uint64(framesRead), now)
+			}
+
+			// Check if finite scan is already complete.
+			if total > 0 && framesRead >= total {
+				return
+			}
+
+			// Restart scan with a new ring.
+			newRing, err := h.restartScan()
+			if err != nil {
+				h.setErr(fmt.Errorf("restart after overrun: %w", err))
+				return
+			}
+			ring = newRing
+		}
+	}
+}
+
+// drainRing reads from ring until completion, stop, error, or overrun.
+// On overrun, it stops the scan, clears the FIFO, and stops the ring
+// before returning drainOverrun.
+func (h *ScanHandle) drainRing(ring transport.BulkRing, framesRead *uint32, total uint32) drainResult {
 	for result := range ring.Results() {
 		if result.Err != nil {
+			// Check if this is a FIFO overrun.
 			h.dev.mu.Lock()
 			sd, se := h.dev.transport.ControlIn(cmdStatus, 0, 0, 2)
-			if se == nil && Status(wire.Uint16LE(sd)).AInScanOverrun() {
+			isOverrun := se == nil && Status(wire.Uint16LE(sd)).AInScanOverrun()
+
+			if isOverrun {
 				_ = h.dev.transport.ControlOut(cmdAInScanStop, 0, 0, nil)
 				_ = h.dev.transport.ControlOut(cmdAInClearFIFO, 0, 0, nil)
-				h.setErr(ErrScanOverrun)
-			} else {
-				h.setErr(result.Err)
+				h.dev.mu.Unlock()
+				ring.Stop()
+				return drainOverrun
 			}
+
+			h.setErr(result.Err)
 			h.dev.mu.Unlock()
-			return
+			return drainFatalError
 		}
 
 		data := result.Data
 		data = data[:len(data)/h.frameSize*h.frameSize]
 
 		if total > 0 {
-			remaining := int(total-framesRead) * h.frameSize
+			remaining := int(total-*framesRead) * h.frameSize
 			if len(data) > remaining {
 				data = data[:remaining]
 			}
@@ -291,19 +374,38 @@ func (h *ScanHandle) runAsyncReader(ring transport.BulkRing) {
 			select {
 			case h.chunks <- Chunk{
 				Data:       data,
-				FrameStart: int(framesRead),
+				FrameStart: int(*framesRead),
 				FrameCount: nFrames,
 			}:
 			case <-h.stop:
-				return
+				return drainStopped
 			}
 		}
 
-		framesRead += uint32(nFrames)
-		if total > 0 && framesRead >= total {
-			return
+		*framesRead += uint32(nFrames)
+		if total > 0 && *framesRead >= total {
+			return drainCompleted
 		}
 	}
+	return drainCompleted
+}
+
+// restartScan creates a new BulkRing and restarts the hardware scan.
+func (h *ScanHandle) restartScan() (transport.BulkRing, error) {
+	ring, err := h.ar.NewBulkRing(epBulkIn, h.bufSize, ringTransferCount, h.opts.pipelineDepth, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	h.dev.mu.Lock()
+	err = h.dev.transport.ControlOut(cmdAInScanStart, 0, 0, h.payload)
+	h.dev.mu.Unlock()
+	if err != nil {
+		ring.Stop()
+		return nil, err
+	}
+
+	return ring, nil
 }
 
 // ringStageSize computes the buffer size in bytes for each async ring transfer.

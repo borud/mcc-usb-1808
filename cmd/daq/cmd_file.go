@@ -131,6 +131,18 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 	}
 	fmt.Printf("\nTotal size:      %s\n", humanBytes(totalSize))
 
+	if len(h.Overruns) > 0 {
+		fmt.Printf("\nOverruns (%d):\n", len(h.Overruns))
+		for _, o := range h.Overruns {
+			t := time.UnixMilli(o.Timestamp)
+			line := fmt.Sprintf("  frame %-12d %s", o.FrameIndex, t.Format(time.RFC3339))
+			if o.EstimatedLostFrames > 0 {
+				line += fmt.Sprintf("  ~%d frames lost", o.EstimatedLostFrames)
+			}
+			fmt.Println(line)
+		}
+	}
+
 	return nil
 }
 

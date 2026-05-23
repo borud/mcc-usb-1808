@@ -90,6 +90,10 @@ type Header struct {
 	Timestamp int64 `json:"timestamp,omitempty"`
 	// Properties holds arbitrary key-value metadata.
 	Properties map[string]string `json:"properties,omitempty"`
+
+	// Overruns records FIFO overrun events that occurred during capture.
+	// Populated by the Reader from the segment trailer, not from JSON.
+	Overruns []OverrunEvent `json:"-"`
 }
 
 // FrameAtTime returns the frame index corresponding to the given time offset

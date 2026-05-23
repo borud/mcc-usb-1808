@@ -2,6 +2,7 @@ package capture
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
@@ -16,6 +17,7 @@ type segmentInfo struct {
 	globalFrameOffset uint64
 	frameCount        uint64
 	dataStartBytes    int64
+	flags             uint8
 	path              string
 }
 
@@ -93,10 +95,17 @@ func NewReader(dir string, segments ...int) (*Reader, error) {
 		return nil, err
 	}
 
-	// Compute aggregate frame count.
+	// Compute aggregate frame count and collect overruns.
 	var totalFrames uint64
 	for _, seg := range segs {
 		totalFrames += seg.frameCount
+		if seg.flags&flagHasOverruns != 0 {
+			events, err := readOverrunTrailer(seg.path)
+			if err != nil {
+				return nil, fmt.Errorf("segment %d overruns: %w", seg.seq, err)
+			}
+			h.Overruns = append(h.Overruns, events...)
+		}
 	}
 	h.FrameCount = totalFrames
 
@@ -362,6 +371,7 @@ func discoverSegments(dir string) ([]segmentInfo, []byte, error) {
 			globalFrameOffset: pre.globalFrameOffset,
 			frameCount:        pre.frameCount,
 			dataStartBytes:    int64(preambleLen) + int64(pre.headerLen),
+			flags:             pre.flags,
 			path:              path,
 		})
 	}
@@ -444,4 +454,48 @@ func parseHeaderFromSegment(path string) (Header, error) {
 	}
 	h.FrameCount = pre.frameCount
 	return h, nil
+}
+
+func readOverrunTrailer(path string) ([]OverrunEvent, error) {
+	f, err := os.Open(path) // #nosec G304
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	// Last 8 bytes are the offset pointer.
+	if fi.Size() < 8 {
+		return nil, fmt.Errorf("file too small for overrun trailer")
+	}
+	if _, err := f.Seek(-8, io.SeekEnd); err != nil {
+		return nil, err
+	}
+	var offBuf [8]byte
+	if _, err := io.ReadFull(f, offBuf[:]); err != nil {
+		return nil, err
+	}
+	overrunOff := int64(binary.LittleEndian.Uint64(offBuf[:]))
+
+	jsonLen := fi.Size() - overrunOff - 8
+	if jsonLen <= 0 {
+		return nil, fmt.Errorf("invalid overrun trailer offset")
+	}
+	if _, err := f.Seek(overrunOff, io.SeekStart); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, jsonLen)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return nil, err
+	}
+
+	var events []OverrunEvent
+	if err := json.Unmarshal(buf, &events); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
