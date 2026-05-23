@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
+	"github.com/borud/mcc-usb-1808/v4/device"
 	pq "github.com/parquet-go/parquet-go"
 )
 
@@ -33,9 +34,8 @@ type parquetConfig struct {
 
 // WithRaw includes raw uint32 sample columns in Parquet output.
 //
-// Raw columns are available for RawUint32 captures and are written alongside
-// the calibrated value columns. The raw columns preserve the exact stored
-// device words for downstream processing.
+// Raw columns are written alongside the calibrated value columns. The raw
+// columns preserve the exact stored device words for downstream processing.
 func WithRaw() ParquetOption {
 	return func(c *parquetConfig) {
 		c.includeRaw = true
@@ -46,7 +46,7 @@ func WithRaw() ParquetOption {
 //
 // The default export contains frame_id, timestamp_s, and one calibrated value
 // column per capture channel. Use [WithRaw] to add one uint32 raw column per
-// channel for RawUint32 captures. Capture metadata and the channel-to-column
+// channel. Capture metadata and the channel-to-column
 // mapping are stored in Parquet key/value metadata under "mcc-usb-1808.capture".
 func Parquet(w io.Writer, r *capture.Reader, opts ...ParquetOption) error {
 	h := r.Header()
@@ -56,12 +56,7 @@ func Parquet(w io.Writer, r *capture.Reader, opts ...ParquetOption) error {
 		opt(&cfg)
 	}
 
-	includeRaw := cfg.includeRaw
-	if includeRaw && h.Format != capture.RawUint32 {
-		return fmt.Errorf("raw parquet columns require RawUint32 capture: %w", capture.ErrInvalidFormat)
-	}
-
-	schema, columns, err := parquetSchema(h, includeRaw)
+	schema, columns, err := parquetSchema(h, cfg.includeRaw)
 	if err != nil {
 		return err
 	}
@@ -130,7 +125,7 @@ func Parquet(w io.Writer, r *capture.Reader, opts ...ParquetOption) error {
 		_ = pw.Close()
 		return err
 	}
-	metadata, err := parquetMetadata(h, columns, includeRaw, frameIdx)
+	metadata, err := parquetMetadata(h, columns, cfg.includeRaw, frameIdx)
 	if err != nil {
 		_ = pw.Close()
 		return err
@@ -144,7 +139,7 @@ type parquetColumn struct {
 	Role            string              `json:"role"`
 	ChannelPosition int                 `json:"channel_position"`
 	ChannelIndex    int                 `json:"channel_index"`
-	ChannelType     capture.ChannelType `json:"channel_type"`
+	ChannelType     device.ChannelType `json:"channel_type"`
 	OriginalName    string              `json:"original_name,omitempty"`
 	Unit            string              `json:"unit,omitempty"`
 	columnIndex     int
@@ -185,7 +180,7 @@ func parquetSchema(h capture.Header, includeRaw bool) (*pq.Schema, []parquetColu
 	names := columnNames(h.Channels)
 	for i, ch := range h.Channels {
 		unit := ""
-		if ch.Type == capture.AnalogIn {
+		if ch.Type == device.ChannelTypeAnalog {
 			unit = "V"
 		}
 		columns = append(columns, addField(names[i], pq.Leaf(pq.DoubleType), parquetColumn{

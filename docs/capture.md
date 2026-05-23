@@ -26,18 +26,9 @@ Offset  Len   Field
 Frame data is stored as raw fixed-width samples. The frame count is written as
 0 initially and patched by `Writer.Close`.
 
-Each frame contains one sample per channel with no padding. The sample size
-depends on the data format:
-
-| Format              | Sample Size | Contents                         |
-|---------------------|-------------|----------------------------------|
-| `RawUint32`         | 4 bytes     | Raw 18-bit ADC / counter / DIO   |
-| `CalibratedFloat64` | 8 bytes     | Pre-calibrated voltages (legacy, read-only) |
-
-New captures always use `RawUint32`. The `CalibratedFloat64` format exists
-only for reading older files; `NewWriter` rejects it.
-
-All values are little-endian.
+Each frame contains one sample per channel with no padding. Each sample is
+4 bytes (little-endian uint32): raw 18-bit ADC codes for analog inputs,
+native uint32 values for counters and digital ports.
 
 ## Writing
 
@@ -46,12 +37,11 @@ header := capture.Header{
     DeviceModel:  "USB-1808X",
     DeviceSerial: "01A2B3C4",
     Channels: []capture.Channel{
-        {Index: 0, Type: capture.AnalogIn, Range: 0, Name: "sensor",
-            Cal: &capture.CalEntry{Slope: 1.0, Offset: 0.0}},
-        {Index: 1, Type: capture.AnalogIn, Range: 0, Name: "ref"},
+        {Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V, Name: "sensor",
+            Cal: &device.Calibration{Slope: 1.0, Offset: 0.0}},
+        {Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V, Name: "ref"},
     },
     SampleRate: 10000,
-    Format:     capture.RawUint32,
     Timestamp:  time.Now().UnixMilli(),
 }
 
@@ -65,8 +55,7 @@ defer w.Close()
 w.WriteBulk(rawBytes) // raw little-endian uint32 frame data from USB
 ```
 
-Use `WriteBulk` to write pre-formatted raw bytes. The writer only accepts
-`RawUint32` format.
+Use `WriteBulk` to write pre-formatted raw bytes (little-endian uint32).
 
 ### Writer Options
 
@@ -163,7 +152,6 @@ type Header struct {
     CalibrationDate time.Time
     Channels        []Channel
     SampleRate      float64           // Hz per channel
-    Format          DataFormat
     FrameCount      uint64            // from preamble, 0 = unknown
 
     // Optional session metadata
@@ -202,7 +190,7 @@ dur := h.Duration()         // total capture duration
 
 ## Calibration
 
-For `RawUint32` format, each analog channel can carry a `CalEntry` with slope
+Each analog channel can carry a `CalEntry` with slope
 and offset coefficients from the device EEPROM. `Frame.Values()` applies these
 automatically:
 
@@ -221,7 +209,6 @@ Non-analog channels are returned as `float64(raw)` without calibration.
 | `ErrWriterClosed`       | Writer method called after Close                 |
 | `ErrReaderClosed`       | Reader method called after Close                 |
 | `ErrNoChannels`         | Header has empty Channels slice                  |
-| `ErrInvalidFormat`      | Unrecognized DataFormat or format mismatch       |
 | `ErrFrameAlignment`     | WriteBulk data not a multiple of frame size      |
 | `ErrNotDirectory`       | Path passed to NewReader is not a directory      |
 | `ErrNoSegments`         | Capture directory contains no segment files      |
@@ -275,14 +262,13 @@ digital, counter, and encoder values are raw values converted to `float64`.
 Capture metadata and channel-to-column mapping are stored in Parquet key/value
 metadata.
 
-Use `export.WithRaw()` to include an additional `uint32` raw column per channel
-for `RawUint32` captures.
+Use `export.WithRaw()` to include an additional `uint32` raw column per channel.
 
 ### WAV
 
 Writes 32-bit IEEE float PCM. Analog channels are first converted to calibrated
 voltages, then each channel is normalized independently by dividing by its own
-peak absolute value. Non-analog channels are normalized by ADCMaxCode (2^18 - 1,
+peak absolute value. Non-analog channels are normalized by ADCFullScale (2^18 - 1,
 the 18-bit full-scale value). This makes WAV useful for visualization in audio editors, but it
 does not preserve absolute voltage levels or cross-channel amplitude ratios.
 The entire capture is buffered in memory for normalization, so this is best

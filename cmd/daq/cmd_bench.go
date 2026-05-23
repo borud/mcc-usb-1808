@@ -95,10 +95,9 @@ func (b *benchCmd) Run(app *cli) error {
 	h := capture.Header{
 		Channels:   make([]capture.Channel, nCh),
 		SampleRate: float64(rate),
-		Format:     capture.RawUint32,
 	}
 	for i, ch := range channels {
-		h.Channels[i] = capture.Channel{Index: ch.Index, Type: capture.AnalogIn}
+		h.Channels[i] = capture.Channel{Index: ch.Index, Type: device.ChannelTypeAnalog}
 	}
 	cw, err := capture.NewWriter(dir, h, capture.WithBufferSize(8192))
 	if err != nil {

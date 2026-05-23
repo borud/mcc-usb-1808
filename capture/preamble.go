@@ -3,7 +3,6 @@ package capture
 import (
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,9 +11,8 @@ import (
 // maxHeaderLen is the maximum allowed header size (1 MiB).
 const maxHeaderLen = 1 << 20
 
-var errReservedFlags = errors.New("capture: reserved flags byte is non-zero")
-
 type preamble struct {
+	flags             uint8
 	headerLen         uint32
 	frameCount        uint64
 	sequenceNumber    uint16
@@ -33,8 +31,9 @@ func readPreamble(r io.Reader) (preamble, error) {
 	if buf[4] != fileVersion {
 		return preamble{}, ErrUnsupportedVersion
 	}
-	if buf[5] != 0 {
-		return preamble{}, errReservedFlags
+	flags := buf[flagsOff]
+	if flags & ^uint8(knownFlags) != 0 {
+		return preamble{}, fmt.Errorf("capture: unknown flags: 0x%02x", flags)
 	}
 
 	hLen := binary.LittleEndian.Uint32(buf[6:])
@@ -43,6 +42,7 @@ func readPreamble(r io.Reader) (preamble, error) {
 	}
 
 	return preamble{
+		flags:             flags,
 		headerLen:         hLen,
 		frameCount:        binary.LittleEndian.Uint64(buf[10:]),
 		sequenceNumber:    binary.LittleEndian.Uint16(buf[18:]),
@@ -85,6 +85,7 @@ type SegmentInfo struct {
 	SequenceNumber    uint16
 	FrameCount        uint64
 	GlobalFrameOffset uint64
+	HasOverruns       bool
 }
 
 // ReadSegmentInfo reads the preamble of a segment file and returns summary info.
@@ -103,16 +104,7 @@ func ReadSegmentInfo(path string) (SegmentInfo, error) {
 		SequenceNumber:    pre.sequenceNumber,
 		FrameCount:        pre.frameCount,
 		GlobalFrameOffset: pre.globalFrameOffset,
+		HasOverruns:       pre.flags&flagHasOverruns != 0,
 	}, nil
 }
 
-func sampleSize(f DataFormat) (int, error) {
-	switch f {
-	case RawUint32:
-		return 4, nil
-	case calibratedFloat64:
-		return 8, nil
-	default:
-		return 0, ErrInvalidFormat
-	}
-}

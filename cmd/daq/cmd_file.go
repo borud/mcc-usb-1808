@@ -11,6 +11,7 @@ import (
 
 	"github.com/borud/mcc-usb-1808/v4/capture"
 	"github.com/borud/mcc-usb-1808/v4/capture/export"
+	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 type fileCmd struct {
@@ -34,7 +35,7 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 
 	// Aggregate overview.
 	fmt.Printf("Directory:       %s\n", c.Dir)
-	fmt.Printf("Format:          %s\n", formatName(h.Format))
+	fmt.Printf("Format:          RawUint32 (4 bytes/sample, little-endian)\n")
 	if h.FrameCount > 0 {
 		fmt.Printf("Frame count:     %d\n", h.FrameCount)
 		dur := float64(h.FrameCount) / h.SampleRate
@@ -59,9 +60,9 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 		if label == "" {
 			label = fmt.Sprintf("ch%d", i)
 		}
-		line := fmt.Sprintf("  [%d] %-12s %s", ch.Index, label, channelTypeName(ch.Type))
-		if ch.Type == capture.AnalogIn {
-			line += fmt.Sprintf("  range=%s", rangeName(ch.Range))
+		line := fmt.Sprintf("  [%d] %-12s %s", ch.Index, label, ch.Type)
+		if ch.Type == device.ChannelTypeAnalog {
+			line += fmt.Sprintf("  range=%s", ch.Range)
 		}
 		if ch.Cal != nil {
 			line += fmt.Sprintf("  cal: slope=%g, offset=%g", ch.Cal.Slope, ch.Cal.Offset)
@@ -129,6 +130,18 @@ func (c *fileInfoCmd) Run(_ *cli) error {
 			pre.SequenceNumber, pre.FrameCount, pre.GlobalFrameOffset, humanBytes(fi.Size()))
 	}
 	fmt.Printf("\nTotal size:      %s\n", humanBytes(totalSize))
+
+	if len(h.Overruns) > 0 {
+		fmt.Printf("\nOverruns (%d):\n", len(h.Overruns))
+		for _, o := range h.Overruns {
+			t := time.UnixMilli(o.Timestamp)
+			line := fmt.Sprintf("  frame %-12d %s", o.FrameIndex, t.Format(time.RFC3339))
+			if o.EstimatedLostFrames > 0 {
+				line += fmt.Sprintf("  ~%d frames lost", o.EstimatedLostFrames)
+			}
+			fmt.Println(line)
+		}
+	}
 
 	return nil
 }
@@ -275,41 +288,4 @@ func humanBytes(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func formatName(f capture.DataFormat) string {
-	switch f {
-	case capture.RawUint32:
-		return "RawUint32 (4 bytes/sample, little-endian)"
-	default:
-		return fmt.Sprintf("unknown(%d)", f)
-	}
-}
 
-func channelTypeName(t capture.ChannelType) string {
-	switch t {
-	case capture.AnalogIn:
-		return "AnalogIn"
-	case capture.DigitalIO:
-		return "DigitalIO"
-	case capture.Counter:
-		return "Counter"
-	case capture.Encoder:
-		return "Encoder"
-	default:
-		return fmt.Sprintf("unknown(%d)", t)
-	}
-}
-
-func rangeName(r uint8) string {
-	switch r {
-	case 0:
-		return "BP10V"
-	case 1:
-		return "BP5V"
-	case 2:
-		return "UP10V"
-	case 3:
-		return "UP5V"
-	default:
-		return fmt.Sprintf("range(%d)", r)
-	}
-}

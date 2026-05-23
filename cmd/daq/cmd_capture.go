@@ -80,18 +80,13 @@ func (c *captureCmd) Run(app *cli) error {
 		Options:  scanOpts,
 	}
 
-	handle, err := dev.CreateScan(cfg, device.WithPipelineDepth(c.Pipeline))
-	if err != nil {
-		return fmt.Errorf("create scan: %w", err)
-	}
-
 	// Build capture header.
 	header, err := c.buildHeader(dev, cfg)
 	if err != nil {
 		return fmt.Errorf("build header: %w", err)
 	}
 
-	// Create capture writer.
+	// Create capture writer (this creates the output directory).
 	var writerOpts []capture.WriterOption
 	if c.FileSize > 0 {
 		writerOpts = append(writerOpts, capture.WithFileSize(c.FileSize))
@@ -105,6 +100,30 @@ func (c *captureCmd) Run(app *cli) error {
 		return fmt.Errorf("create writer: %w", err)
 	}
 	defer cw.Close()
+
+	// Create overrun log (sidecar JSONL file for crash recovery).
+	overrunLog, err := capture.NewOverrunLog(c.Out)
+	if err != nil {
+		return fmt.Errorf("create overrun log: %w", err)
+	}
+	defer overrunLog.Close()
+
+	handle, err := dev.CreateScan(cfg,
+		device.WithPipelineDepth(c.Pipeline),
+		device.WithOverrunCallback(func(lastFrame uint64, ts time.Time) {
+			evt := capture.OverrunEvent{
+				FrameIndex: lastFrame,
+				Timestamp:  ts.UnixMilli(),
+			}
+			if logErr := overrunLog.Record(evt); logErr != nil {
+				fmt.Fprintf(os.Stderr, "\nwarning: failed to log overrun: %v\n", logErr)
+			}
+			fmt.Fprintf(os.Stderr, "\nwarning: FIFO overrun at frame %d, continuing capture\n", lastFrame)
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("create scan: %w", err)
+	}
 
 	// Handle interrupt.
 	sigCh := make(chan os.Signal, 1)
@@ -166,10 +185,18 @@ func (c *captureCmd) Run(app *cli) error {
 		return fmt.Errorf("write: %w", writeErr)
 	}
 
+	// Transfer overrun events to writer before closing.
+	for _, evt := range overrunLog.Events() {
+		cw.RecordOverrun(evt)
+	}
+
 	if err := cw.Close(); err != nil {
 		return fmt.Errorf("close writer: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "wrote %d frames\n", cw.FramesWritten())
+	if n := cw.OverrunCount(); n > 0 {
+		fmt.Fprintf(os.Stderr, "warning: %d FIFO overrun(s) during capture\n", n)
+	}
 	return nil
 }
 

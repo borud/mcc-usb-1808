@@ -21,16 +21,13 @@ type segmentWriter struct {
 	seq           uint16
 	globalOffset  uint64
 	closed        bool
+	overruns      []OverrunEvent
 }
 
 func newSegmentWriter(pendingPath, finalPath string, h Header, seq uint16, globalOffset uint64, bufferFrames int) (*segmentWriter, error) {
 	if len(h.Channels) == 0 {
 		return nil, ErrNoChannels
 	}
-	if h.Format != RawUint32 {
-		return nil, ErrInvalidFormat
-	}
-
 	const sampleBytes = 4
 	frameSize := len(h.Channels) * sampleBytes
 
@@ -129,6 +126,10 @@ func (sw *segmentWriter) writeBulk(data []byte) error {
 	return nil
 }
 
+func (sw *segmentWriter) addOverrun(e OverrunEvent) {
+	sw.overruns = append(sw.overruns, e)
+}
+
 func (sw *segmentWriter) flush() error {
 	if sw.bufUsed == 0 {
 		return nil
@@ -191,5 +192,41 @@ func (sw *segmentWriter) doClose(keep bool) error {
 		return err
 	}
 
+	if err := sw.writeOverrunTrailer(); err != nil {
+		sw.f.Close()
+		return err
+	}
+
 	return sw.f.Close()
+}
+
+func (sw *segmentWriter) writeOverrunTrailer() error {
+	if len(sw.overruns) == 0 {
+		return nil
+	}
+
+	overrunOff, err := sw.f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return err
+	}
+
+	overrunJSON, err := json.Marshal(sw.overruns)
+	if err != nil {
+		return err
+	}
+	if _, err := sw.f.Write(overrunJSON); err != nil {
+		return err
+	}
+
+	var offBuf [8]byte
+	binary.LittleEndian.PutUint64(offBuf[:], uint64(overrunOff))
+	if _, err := sw.f.Write(offBuf[:]); err != nil {
+		return err
+	}
+
+	if _, err := sw.f.Seek(flagsOff, io.SeekStart); err != nil {
+		return err
+	}
+	_, err = sw.f.Write([]byte{flagHasOverruns})
+	return err
 }

@@ -1,11 +1,14 @@
 package device
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/borud/mcc-usb-1808/v4/transport"
 	"github.com/borud/mcc-usb-1808/v4/wire"
+	"github.com/stretchr/testify/require"
 )
 
 // mockRingTransport implements both Transport and AsyncBulkReader for testing.
@@ -66,6 +69,156 @@ func (r *mockBulkRing) Stop() {
 	r.stopped = true
 }
 
+// overrunMockTransport simulates an overrun: the first ring delivers some
+// data then an error. ControlIn returns the overrun status bit.
+// After recovery, subsequent rings deliver more data normally.
+type overrunMockTransport struct {
+	calls    []transport.Call
+	mu       sync.Mutex
+	ringCall int // tracks NewBulkRing calls
+	// rings[0] = results for first ring (ends with error)
+	// rings[1] = results for second ring (after recovery)
+	rings [][]transport.RingResult
+}
+
+func (m *overrunMockTransport) ControlOut(request uint8, wValue, wIndex uint16, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	m.calls = append(m.calls, transport.Call{
+		Method: "ControlOut", Request: request, WValue: wValue, WIndex: wIndex, Data: dataCopy,
+	})
+	return nil
+}
+
+func (m *overrunMockTransport) ControlIn(_ uint8, _, _ uint16, n int) ([]byte, error) {
+	// Return status with AInScanOverrun bit set.
+	buf := make([]byte, n)
+	buf[0] = 0x04 // statusAInScanOverrun
+	return buf, nil
+}
+
+func (m *overrunMockTransport) BulkRead(_ uint8, _ int, _ time.Duration) ([]byte, error) {
+	return nil, nil
+}
+func (m *overrunMockTransport) BulkReadInto(_ uint8, _ []byte, _ time.Duration) (int, error) {
+	return 0, nil
+}
+func (m *overrunMockTransport) BulkWrite(_ uint8, data []byte, _ time.Duration) (int, error) {
+	return len(data), nil
+}
+func (m *overrunMockTransport) Close() error { return nil }
+
+func (m *overrunMockTransport) NewBulkRing(_ uint8, _, _, _ int, _ uint) (transport.BulkRing, error) {
+	m.mu.Lock()
+	idx := m.ringCall
+	m.ringCall++
+	m.mu.Unlock()
+
+	if idx >= len(m.rings) {
+		// No more data — return empty ring.
+		ch := make(chan transport.RingResult)
+		close(ch)
+		return &mockBulkRing{ch: ch}, nil
+	}
+
+	results := m.rings[idx]
+	ch := make(chan transport.RingResult, len(results))
+	for _, r := range results {
+		ch <- r
+	}
+	close(ch)
+	return &mockBulkRing{ch: ch}, nil
+}
+
+func TestScanHandle_OverrunRecovery(t *testing.T) {
+	const (
+		nCh       = 2
+		frameSize = nCh * 4
+	)
+
+	frame1 := make([]byte, frameSize)
+	copy(frame1[0:4], wire.PutUint32LE(1000))
+	copy(frame1[4:8], wire.PutUint32LE(2000))
+
+	frame2 := make([]byte, frameSize)
+	copy(frame2[0:4], wire.PutUint32LE(3000))
+	copy(frame2[4:8], wire.PutUint32LE(4000))
+
+	frame3 := make([]byte, frameSize)
+	copy(frame3[0:4], wire.PutUint32LE(5000))
+	copy(frame3[4:8], wire.PutUint32LE(6000))
+
+	mt := &overrunMockTransport{
+		rings: [][]transport.RingResult{
+			// First ring: one good frame, then error (overrun).
+			{
+				{Data: frame1},
+				{Err: fmt.Errorf("usb: transfer error")},
+			},
+			// Second ring (after recovery): two more good frames.
+			{
+				{Data: frame2},
+				{Data: frame3},
+			},
+		},
+	}
+
+	dev := NewDevice(mt, USB1808)
+
+	var overrunFrames []uint64
+	var overrunMu sync.Mutex
+
+	cfg := ScanConfig{
+		Channels: []ChannelConfig{
+			{Index: 0, Type: ChannelTypeAnalog, Range: BP10V, Mode: Differential},
+			{Index: 1, Type: ChannelTypeAnalog, Range: BP10V, Mode: Differential},
+		},
+		Rate: 1000,
+	}
+	h, err := dev.CreateScan(cfg,
+		WithPipelineDepth(4),
+		WithOverrunCallback(func(lastFrame uint64, _ time.Time) {
+			overrunMu.Lock()
+			overrunFrames = append(overrunFrames, lastFrame)
+			overrunMu.Unlock()
+		}),
+	)
+	require.NoError(t, err)
+	require.NoError(t, h.Start())
+
+	var chunks []Chunk
+	done := make(chan struct{})
+	go func() {
+		for chunk := range h.Chunks() {
+			chunks = append(chunks, chunk)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for chunks")
+	}
+
+	require.NoError(t, h.Err())
+
+	// Should have received 3 frames total (1 before overrun + 2 after).
+	totalFrames := 0
+	for _, c := range chunks {
+		totalFrames += c.FrameCount
+	}
+	require.Equal(t, 3, totalFrames)
+
+	// Overrun callback should have fired once, at frame 1.
+	overrunMu.Lock()
+	defer overrunMu.Unlock()
+	require.Len(t, overrunFrames, 1)
+	require.Equal(t, uint64(1), overrunFrames[0])
+}
+
 func TestCreateScan_ConfigSendsCorrectTransfers(t *testing.T) {
 	mock := transport.NewMockTransport(
 		transport.MockResponse{}, // ADC setup
@@ -82,74 +235,43 @@ func TestCreateScan_ConfigSendsCorrectTransfers(t *testing.T) {
 		Rate: 100000,
 	}
 	h, err := dev.CreateScan(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	// Verify ADC setup was sent.
 	adcCall := mock.Calls[0]
-	if adcCall.Request != cmdADCSetup {
-		t.Errorf("first call request = 0x%02x, want 0x%02x", adcCall.Request, cmdADCSetup)
-	}
-	// Ch0: BP10V|Diff = 0x00, Ch1: BP5V|(SE<<2) = 0x05
-	if adcCall.Data[0] != 0x00 {
-		t.Errorf("ADC ch0 = 0x%02x, want 0x00", adcCall.Data[0])
-	}
-	if adcCall.Data[1] != 0x05 {
-		t.Errorf("ADC ch1 = 0x%02x, want 0x05", adcCall.Data[1])
-	}
+	require.Equal(t, uint8(cmdADCSetup), adcCall.Request)
+	require.Equal(t, uint8(0x00), adcCall.Data[0]) // Ch0: BP10V|Diff
+	require.Equal(t, uint8(0x05), adcCall.Data[1]) // Ch1: BP5V|(SE<<2)
 
-	// Verify scan queue config.
 	queueCall := mock.Calls[1]
-	if queueCall.Request != cmdAInConfig {
-		t.Errorf("second call request = 0x%02x, want 0x%02x", queueCall.Request, cmdAInConfig)
-	}
-	if queueCall.WIndex != 2 { // lastChan - 1 = 3 channels - 1 = 2
-		t.Errorf("wIndex = %d, want 2", queueCall.WIndex)
-	}
-	if queueCall.Data[0] != 0 || queueCall.Data[1] != 1 || queueCall.Data[2] != ScanChanDIO {
-		t.Errorf("queue = %v, want [0 1 8]", queueCall.Data[:3])
-	}
+	require.Equal(t, uint8(cmdAInConfig), queueCall.Request)
+	require.Equal(t, uint16(2), queueCall.WIndex) // lastChan - 1
+	require.Equal(t, uint8(0), queueCall.Data[0])
+	require.Equal(t, uint8(1), queueCall.Data[1])
+	require.Equal(t, uint8(ScanChanDIO), queueCall.Data[2])
 
-	// Verify handle properties.
-	if h.Rate() != 100000 {
-		t.Errorf("rate = %d, want 100000", h.Rate())
-	}
-	if h.FrameSize() != 3*4 {
-		t.Errorf("frameSize = %d, want %d", h.FrameSize(), 3*4)
-	}
-	if len(h.Channels()) != 3 {
-		t.Errorf("channels = %d, want 3", len(h.Channels()))
-	}
+	require.Equal(t, 100000, h.Rate())
+	require.Equal(t, 3*4, h.FrameSize())
+	require.Len(t, h.Channels(), 3)
 }
 
 func TestCreateScan_ValidationErrors(t *testing.T) {
 	mock := transport.NewMockTransport()
 	dev := NewDevice(mock, USB1808)
 
-	// Empty channels.
 	_, err := dev.CreateScan(ScanConfig{Channels: nil, Rate: 1000})
-	if err == nil {
-		t.Error("expected error for empty channels")
-	}
+	require.Error(t, err, "expected error for empty channels")
 
-	// Invalid rate.
 	_, err = dev.CreateScan(ScanConfig{
 		Channels: []ChannelConfig{{Index: 0, Type: ChannelTypeAnalog}},
 		Rate:     0,
 	})
-	if err == nil {
-		t.Error("expected error for zero rate")
-	}
+	require.Error(t, err, "expected error for zero rate")
 
-	// Invalid channel index.
 	_, err = dev.CreateScan(ScanConfig{
 		Channels: []ChannelConfig{{Index: 99, Type: ChannelTypeAnalog}},
 		Rate:     1000,
 	})
-	if err == nil {
-		t.Error("expected error for invalid channel index")
-	}
+	require.Error(t, err, "expected error for invalid channel index")
 }
 
 func TestScanHandle_StartAndStop(t *testing.T) {
@@ -160,7 +282,7 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 
 	frameData := make([]byte, frameSize)
 	copy(frameData[0:4], wire.PutUint32LE(ADCMidscale))
-	copy(frameData[4:8], wire.PutUint32LE(ADCMaxCode))
+	copy(frameData[4:8], wire.PutUint32LE(ADCFullScale))
 
 	mt := &mockRingTransport{
 		results: []transport.RingResult{
@@ -179,31 +301,18 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 		Count: 2,
 	}
 	h, err := dev.CreateScan(cfg, WithPipelineDepth(4))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, h.Start())
 
-	if err := h.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Read at least one chunk.
 	chunk, ok := <-h.Chunks()
-	if !ok {
-		t.Fatal("chunks channel closed without data")
-	}
-	if len(chunk.Data) < frameSize {
-		t.Errorf("chunk size = %d, want >= %d", len(chunk.Data), frameSize)
-	}
+	require.True(t, ok, "chunks channel closed without data")
+	require.GreaterOrEqual(t, len(chunk.Data), frameSize)
 
-	// Drain remaining.
 	for range h.Chunks() {
 		_ = true // drain
 	}
 
-	if h.Err() != nil {
-		t.Errorf("unexpected error: %v", h.Err())
-	}
+	require.NoError(t, h.Err())
 }
 
 func TestScanHandle_FiniteScanCompletesViaRing(t *testing.T) {
@@ -213,7 +322,6 @@ func TestScanHandle_FiniteScanCompletesViaRing(t *testing.T) {
 		count     = 10
 	)
 
-	// Build frame data for exactly `count` frames.
 	allFrames := make([]byte, count*frameSize)
 	for i := range count {
 		copy(allFrames[i*frameSize:], wire.PutUint32LE(ADCMidscale))
@@ -236,13 +344,8 @@ func TestScanHandle_FiniteScanCompletesViaRing(t *testing.T) {
 		Count: count,
 	}
 	h, err := dev.CreateScan(cfg, WithPipelineDepth(4))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := h.Start(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, h.Start())
 
 	done := make(chan int)
 	go func() {
@@ -255,9 +358,7 @@ func TestScanHandle_FiniteScanCompletesViaRing(t *testing.T) {
 
 	select {
 	case got := <-done:
-		if got != count {
-			t.Errorf("received %d frames, want %d", got, count)
-		}
+		require.Equal(t, count, got)
 	case <-time.After(5 * time.Second):
 		t.Fatal("Chunks() did not close in time")
 	}

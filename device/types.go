@@ -54,8 +54,8 @@ const (
 	// ADCMidscale is the bipolar zero-crossing point of the 18-bit ADC.
 	ADCMidscale = 1 << 17
 
-	// ADCMaxCode is the full-scale code of the 18-bit ADC.
-	ADCMaxCode = 1<<18 - 1
+	// ADCFullScale is the full-scale code of the 18-bit ADC.
+	ADCFullScale = 1<<18 - 1
 )
 
 func (r Range) String() string {
@@ -133,8 +133,8 @@ type ChannelConfig struct {
 
 // Calibration holds a single calibration coefficient pair read from EEPROM.
 type Calibration struct {
-	Slope  float32
-	Offset float32
+	Slope  float32 `json:"slope"`
+	Offset float32 `json:"offset"`
 }
 
 // ToVolts converts a raw 18-bit ADC value to voltage using these calibration
@@ -145,7 +145,7 @@ func (c Calibration) ToVolts(raw uint32, r Range) float64 {
 
 	// Clamp for unipolar ranges.
 	if r >= UP10V {
-		calibrated = max(0, min(ADCMaxCode, calibrated))
+		calibrated = max(0, min(ADCFullScale, calibrated))
 	}
 	calibrated = math.Round(calibrated)
 
@@ -155,9 +155,9 @@ func (c Calibration) ToVolts(raw uint32, r Range) float64 {
 	case BP5V:
 		return (calibrated - ADCMidscale) * 5.0 / ADCMidscale
 	case UP10V:
-		return calibrated * 10.0 / ADCMaxCode
+		return calibrated * 10.0 / ADCFullScale
 	case UP5V:
-		return calibrated * 5.0 / ADCMaxCode
+		return calibrated * 5.0 / ADCFullScale
 	default:
 		return float64(raw)
 	}

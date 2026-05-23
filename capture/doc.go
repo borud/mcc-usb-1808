@@ -9,16 +9,16 @@
 //	  seg_0001.daq
 //	  seg_0002.daq
 //
-// New captures use [RawUint32] (4 bytes per sample, raw 18-bit ADC / counter /
-// digital values). The legacy [calibratedFloat64] format (8 bytes per sample) is
-// supported for reading older files but rejected by [NewWriter].
+// Samples are 4 bytes each (little-endian uint32): raw 18-bit ADC codes for
+// analog inputs, native uint32 values for counters and digital ports.
+// Calibration coefficients in the header convert analog values to voltages.
 //
 // # Segment file layout
 //
 //	Offset  Len   Field
 //	0       4     Magic: "DAQ\x00"
 //	4       1     Version (0x02)
-//	5       1     Flags (reserved, must be 0)
+//	5       1     Flags (see below)
 //	6       4     Header length N (uint32 LE)
 //	10      8     Frame count (uint64 LE, 0 = unknown)
 //	18      2     Sequence number (uint16 LE)
@@ -29,6 +29,18 @@
 // The frame count at offset 10 is written as 0 initially and updated by the
 // segment writer at close time via seeking. A value of 0 means the count is
 // unknown.
+//
+// # Flags byte
+//
+// Bit 0 (flagHasOverruns): when set, the file contains an overrun trailer
+// appended after the frame data:
+//
+//	[end of frame data]
+//	<overrun JSON>       JSON-encoded []OverrunEvent
+//	<8 bytes>            uint64 LE byte offset of the overrun JSON
+//
+// Readers check the flags byte; if bit 0 is set, read the last 8 bytes of
+// the file to obtain the offset, then seek there to decode the overrun array.
 //
 // Each frame is len(Header.Channels) samples, stored consecutively with no
 // padding or per-frame delimiters. Frame k starts at byte offset
@@ -51,8 +63,17 @@ const (
 	// preambleLen is the total preamble size: magic(4) + version(1) + flags(1) +
 	// headerLen(4) + frameCount(8) + seqNumber(2) + globalFrameOffset(8).
 	preambleLen = 28
+	// flagsOff is the byte offset of the flags field in the preamble.
+	flagsOff = 5
 	// frameCountOff is the byte offset of the frame count field in the preamble.
 	frameCountOff = 10
 	// globalFrameOffsetOff is the byte offset of the global frame offset in the preamble.
 	globalFrameOffsetOff = 20
+
+	// flagHasOverruns indicates the segment file has an overrun trailer
+	// appended after the frame data.
+	flagHasOverruns = 0x01
+
+	// knownFlags is the mask of all flags understood by this version.
+	knownFlags = flagHasOverruns
 )

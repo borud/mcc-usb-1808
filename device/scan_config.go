@@ -1,6 +1,9 @@
 package device
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // ScanConfig holds configuration for an analog input scan.
 type ScanConfig struct {
@@ -17,8 +20,14 @@ type ScanConfig struct {
 // ScanOption configures optional parameters for CreateScan.
 type ScanOption func(*scanOptions)
 
+// OverrunFunc is called when a FIFO overrun is detected and recovered.
+// lastFrame is the global frame index of the last good frame before the gap.
+// Called from the reader goroutine; must not block for long.
+type OverrunFunc func(lastFrame uint64, ts time.Time)
+
 type scanOptions struct {
 	pipelineDepth int
+	onOverrun     OverrunFunc
 }
 
 // DefaultPipelineDepth is the number of bulk read results to buffer ahead
@@ -31,6 +40,14 @@ func WithPipelineDepth(n int) ScanOption {
 		if n > 0 {
 			o.pipelineDepth = n
 		}
+	}
+}
+
+// WithOverrunCallback registers a function that is called each time a FIFO
+// overrun is detected and recovered from during scanning.
+func WithOverrunCallback(fn OverrunFunc) ScanOption {
+	return func(o *scanOptions) {
+		o.onOverrun = fn
 	}
 }
 

@@ -19,7 +19,7 @@ Offset  Len   Field
 28+N    ...   Frame data
 ```
 
-Frames are `len(channels) * 4` bytes (RawUint32), no delimiters.
+Frames are `len(channels) * 4` bytes (little-endian uint32), no delimiters.
 Segments are directly seekable by frame index.
 
 ## Directory structure
@@ -38,12 +38,11 @@ h := capture.Header{
     DeviceModel:  "USB-1808X",
     DeviceSerial: "00000001",
     Channels: []capture.Channel{
-        {Index: 0, Type: capture.AnalogIn, Range: 0,
-            Cal: &capture.CalEntry{Slope: 1.0002, Offset: -3.5}},
-        {Index: 8, Type: capture.DigitalIO},
+        {Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V,
+            Cal: &device.Calibration{Slope: 1.0002, Offset: -3.5}},
+        {Index: 8, Type: device.ChannelTypeDIO},
     },
     SampleRate: 100000,
-    Format:     capture.RawUint32,
 }
 
 w, _ := capture.NewWriter("capture_dir", h)
@@ -102,7 +101,6 @@ Optional: `FPGAVersion`, `CalibrationDate`, `FrameCount`, `Timestamp`,
 | `ErrInvalidMagic`       | Not a capture file                     |
 | `ErrUnsupportedVersion` | Newer version than supported           |
 | `ErrNoChannels`         | Empty channel list                     |
-| `ErrInvalidFormat`      | Unknown format or wrong write method   |
 | `ErrNotDirectory`       | Path is not a directory                |
 | `ErrNoSegments`         | No segment files found                 |
 | `ErrSegmentMismatch`    | Inconsistent headers across segments   |
@@ -184,7 +182,7 @@ export.Parquet(f, r, export.WithRaw())
 
 Writes an Apache Parquet file with `frame_id`, `timestamp_s`, and one
 calibrated value column per channel. `export.WithRaw()` adds one `uint32` raw
-column per channel for `RawUint32` captures.
+column per channel.
 
 ### WAV
 

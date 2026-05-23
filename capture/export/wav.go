@@ -22,7 +22,7 @@ var errWAVTooLarge = errors.New("export: data exceeds WAV 4 GiB limit")
 //
 // This format is useful for visualizing signals in audio editors such
 // as Audacity. Non-analog channels (digital, counter, encoder) are
-// included as-is, scaled to [-1, +1] by dividing by ADCMaxCode (the 18-bit
+// included as-is, scaled to [-1, +1] by dividing by ADCFullScale (the 18-bit
 // ADC full-scale value).
 //
 // WAV files have a 4 GiB size limit due to the 32-bit chunk size fields.
@@ -58,8 +58,8 @@ func WAV(w io.Writer, r *capture.Reader) error {
 	// For other channels, use the 18-bit full-scale value.
 	scales := make([]float64, numCh)
 	for i, ch := range h.Channels {
-		if ch.Type != capture.AnalogIn {
-			scales[i] = device.ADCMaxCode
+		if ch.Type != device.ChannelTypeAnalog {
+			scales[i] = device.ADCFullScale
 			continue
 		}
 		var maxAbs float64

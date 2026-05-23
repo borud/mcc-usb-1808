@@ -2,10 +2,10 @@ package capture
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +17,7 @@ type segmentInfo struct {
 	globalFrameOffset uint64
 	frameCount        uint64
 	dataStartBytes    int64
+	flags             uint8
 	path              string
 }
 
@@ -94,19 +95,23 @@ func NewReader(dir string, segments ...int) (*Reader, error) {
 		return nil, err
 	}
 
-	// Compute aggregate frame count.
+	// Compute aggregate frame count and collect overruns.
 	var totalFrames uint64
 	for _, seg := range segs {
 		totalFrames += seg.frameCount
+		if seg.flags&flagHasOverruns != 0 {
+			events, err := readOverrunTrailer(seg.path)
+			if err != nil {
+				return nil, fmt.Errorf("segment %d overruns: %w", seg.seq, err)
+			}
+			h.Overruns = append(h.Overruns, events...)
+		}
 	}
 	h.FrameCount = totalFrames
 
-	ss, err := sampleSize(h.Format)
-	if err != nil {
-		return nil, err
-	}
+	const sampleBytes = 4
 	numCh := len(h.Channels)
-	frameSize := numCh * ss
+	frameSize := numCh * sampleBytes
 
 	// Verify all segments have consistent headers.
 	for i := 1; i < len(segs); i++ {
@@ -120,13 +125,8 @@ func NewReader(dir string, segments ...int) (*Reader, error) {
 	}
 
 	frame := Frame{header: &h}
-	switch h.Format {
-	case RawUint32:
-		frame.raw = make([]uint32, numCh)
-		frame.floats = make([]float64, numCh)
-	case calibratedFloat64:
-		frame.floats = make([]float64, numCh)
-	}
+	frame.raw = make([]uint32, numCh)
+	frame.floats = make([]float64, numCh)
 
 	return &Reader{
 		header:    h,
@@ -315,28 +315,16 @@ func (rd *Reader) Close() error {
 }
 
 func (rd *Reader) decodeFrame() {
-	switch rd.header.Format {
-	case RawUint32:
-		for i := range rd.numCh {
-			rd.frame.raw[i] = binary.LittleEndian.Uint32(rd.buf[i*4:])
-		}
-	case calibratedFloat64:
-		for i := range rd.numCh {
-			rd.frame.floats[i] = math.Float64frombits(binary.LittleEndian.Uint64(rd.buf[i*8:]))
-		}
+	for i := range rd.numCh {
+		rd.frame.raw[i] = binary.LittleEndian.Uint32(rd.buf[i*4:])
 	}
 }
 
 func (rd *Reader) ensureRABuffers(n int) {
 	for len(rd.raFrames) < n {
 		f := Frame{header: &rd.header}
-		switch rd.header.Format {
-		case RawUint32:
-			f.raw = make([]uint32, rd.numCh)
-			f.floats = make([]float64, rd.numCh)
-		case calibratedFloat64:
-			f.floats = make([]float64, rd.numCh)
-		}
+		f.raw = make([]uint32, rd.numCh)
+		f.floats = make([]float64, rd.numCh)
 		rd.raFrames = append(rd.raFrames, f)
 	}
 
@@ -348,15 +336,8 @@ func (rd *Reader) ensureRABuffers(n int) {
 
 func (rd *Reader) decodeRAFrame(frameIdx, bufIdx int) {
 	off := bufIdx * rd.frameSize
-	switch rd.header.Format {
-	case RawUint32:
-		for ch := range rd.numCh {
-			rd.raFrames[frameIdx].raw[ch] = binary.LittleEndian.Uint32(rd.raBuf[off+ch*4:])
-		}
-	case calibratedFloat64:
-		for ch := range rd.numCh {
-			rd.raFrames[frameIdx].floats[ch] = math.Float64frombits(binary.LittleEndian.Uint64(rd.raBuf[off+ch*8:]))
-		}
+	for ch := range rd.numCh {
+		rd.raFrames[frameIdx].raw[ch] = binary.LittleEndian.Uint32(rd.raBuf[off+ch*4:])
 	}
 }
 
@@ -390,6 +371,7 @@ func discoverSegments(dir string) ([]segmentInfo, []byte, error) {
 			globalFrameOffset: pre.globalFrameOffset,
 			frameCount:        pre.frameCount,
 			dataStartBytes:    int64(preambleLen) + int64(pre.headerLen),
+			flags:             pre.flags,
 			path:              path,
 		})
 	}
@@ -472,4 +454,48 @@ func parseHeaderFromSegment(path string) (Header, error) {
 	}
 	h.FrameCount = pre.frameCount
 	return h, nil
+}
+
+func readOverrunTrailer(path string) ([]OverrunEvent, error) {
+	f, err := os.Open(path) // #nosec G304
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	// Last 8 bytes are the offset pointer.
+	if fi.Size() < 8 {
+		return nil, fmt.Errorf("file too small for overrun trailer")
+	}
+	if _, err := f.Seek(-8, io.SeekEnd); err != nil {
+		return nil, err
+	}
+	var offBuf [8]byte
+	if _, err := io.ReadFull(f, offBuf[:]); err != nil {
+		return nil, err
+	}
+	overrunOff := int64(binary.LittleEndian.Uint64(offBuf[:]))
+
+	jsonLen := fi.Size() - overrunOff - 8
+	if jsonLen <= 0 {
+		return nil, fmt.Errorf("invalid overrun trailer offset")
+	}
+	if _, err := f.Seek(overrunOff, io.SeekStart); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, jsonLen)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return nil, err
+	}
+
+	var events []OverrunEvent
+	if err := json.Unmarshal(buf, &events); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
