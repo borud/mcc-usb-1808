@@ -84,6 +84,9 @@ func (d *Device) CreateScan(cfg ScanConfig, opts ...ScanOption) (*ScanHandle, er
 	// Configure scan queue.
 	queueBuf := make([]byte, MaxAInQueue)
 	for i, ch := range cfg.Channels {
+		if ch.Index < 0 || ch.Index > 255 {
+			return nil, fmt.Errorf("channel index out of range for queue entry: %d", ch.Index)
+		}
 		queueBuf[i] = uint8(ch.Index)
 	}
 	lastChan := uint16(len(cfg.Channels))
