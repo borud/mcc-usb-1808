@@ -14,4 +14,10 @@ var (
 	ErrNotInitialized    = errors.New("usb1808: device not initialized")
 	ErrScanNotStarted    = errors.New("usb1808: scan not started")
 	ErrScanStopped       = errors.New("usb1808: scan already stopped")
+
+	ErrAOutScanRunning    = errors.New("usb1808: analog output scan already running")
+	ErrAOutScanNotStarted = errors.New("usb1808: analog output scan not started")
+	ErrAOutScanStopped    = errors.New("usb1808: analog output scan already stopped")
+	ErrAOutUnderrun       = errors.New("usb1808: analog output FIFO underrun")
+	ErrInvalidAOutQueue   = errors.New("usb1808: invalid AOut scan queue")
 )

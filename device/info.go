@@ -49,16 +49,6 @@ func (d *Device) Reset() error {
 	return d.transport.ControlOut(cmdReset, 0, 0, nil)
 }
 
-// AnalogOutRaw writes a raw 16-bit value to the specified analog output channel.
-func (d *Device) AnalogOutRaw(channel int, value uint16) error {
-	if channel < 0 || channel >= NumAOutChannels {
-		return fmt.Errorf("%w: %d", ErrInvalidChannel, channel)
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.transport.ControlOut(cmdAOut, uint16(value), uint16(channel), nil)
-}
-
 // SetTriggerConfig writes the trigger configuration byte.
 // Bit 0: mode (0=level, 1=edge). Bit 1: polarity (0=low/falling, 1=high/rising).
 func (d *Device) SetTriggerConfig(config uint8) error {

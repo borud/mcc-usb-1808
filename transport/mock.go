@@ -2,6 +2,8 @@ package transport
 
 import (
 	"fmt"
+	"io"
+	"sync"
 	"time"
 )
 
@@ -124,4 +126,65 @@ func (m *MockTransport) Close() error {
 // Closed returns true if Close was called.
 func (m *MockTransport) Closed() bool {
 	return m.closed
+}
+
+// MockBulkOutRing is a mock BulkOutRing that synchronously drains a
+// BulkOutSource on creation and records the bytes that would have been sent.
+type MockBulkOutRing struct {
+	done   chan struct{}
+	stopCh chan struct{}
+	once   sync.Once
+	Data   []byte
+	err    error
+}
+
+func newMockBulkOutRing(source BulkOutSource, bufSize int) *MockBulkOutRing {
+	ring := &MockBulkOutRing{
+		done:   make(chan struct{}),
+		stopCh: make(chan struct{}),
+	}
+	go func() {
+		defer close(ring.done)
+		buf := make([]byte, bufSize)
+		for {
+			select {
+			case <-ring.stopCh:
+				return
+			default:
+			}
+			n, err := source.Fill(buf)
+			if n > 0 {
+				ring.Data = append(ring.Data, buf[:n]...)
+			}
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				ring.err = err
+				return
+			}
+		}
+	}()
+	return ring
+}
+
+// Done implements BulkOutRing.
+func (r *MockBulkOutRing) Done() <-chan struct{} { return r.done }
+
+// Err implements BulkOutRing.
+func (r *MockBulkOutRing) Err() error { return r.err }
+
+// Stop implements BulkOutRing.
+func (r *MockBulkOutRing) Stop() {
+	r.once.Do(func() { close(r.stopCh) })
+}
+
+// Stats implements BulkOutRing.
+func (r *MockBulkOutRing) Stats() BulkOutRingStats {
+	return BulkOutRingStats{BytesSent: uint64(len(r.Data))}
+}
+
+// NewBulkOutRing implements AsyncBulkWriter for MockTransport.
+func (m *MockTransport) NewBulkOutRing(_ uint8, bufSize, _ int, source BulkOutSource, _ uint) (BulkOutRing, error) {
+	return newMockBulkOutRing(source, bufSize), nil
 }

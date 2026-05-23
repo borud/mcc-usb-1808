@@ -103,6 +103,8 @@ func TestClose(t *testing.T) {
 	mock := transport.NewMockTransport(
 		transport.MockResponse{}, // AInScanStop
 		transport.MockResponse{}, // AOutScanStop
+		transport.MockResponse{}, // cmdAOut ch0 zero
+		transport.MockResponse{}, // cmdAOut ch1 zero
 	)
 	dev := NewDevice(mock, USB1808)
 	dev.initialized.Store(true)
@@ -112,6 +114,28 @@ func TestClose(t *testing.T) {
 	}
 	if !mock.Closed() {
 		t.Error("expected transport to be closed")
+	}
+	// Verify the two DAC zero writes were sent.
+	if len(mock.Calls) < 4 {
+		t.Fatalf("expected at least 4 control calls, got %d", len(mock.Calls))
+	}
+}
+
+func TestClose_KeepAOutOnClose(t *testing.T) {
+	mock := transport.NewMockTransport(
+		transport.MockResponse{}, // AInScanStop
+		transport.MockResponse{}, // AOutScanStop
+		// no DAC zero commands expected
+	)
+	dev := NewDevice(mock, USB1808, KeepAOutOnClose())
+	dev.initialized.Store(true)
+
+	if err := dev.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Only 2 control calls expected (AInScanStop + AOutScanStop).
+	if len(mock.Calls) != 2 {
+		t.Errorf("expected 2 control calls, got %d", len(mock.Calls))
 	}
 }
 

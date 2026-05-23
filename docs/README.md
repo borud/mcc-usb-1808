@@ -27,6 +27,7 @@ Both models provide:
 
 - [Getting Started](getting-started.md) -- prerequisites, installation, quick start
 - [Analog Input](analog-input.md) -- scanning, decoding, and voltage conversion
+- [Analog Output](aout.md) -- single-shot DAC writes, paced scan (PlayOnce / Loop)
 - [Calibration](calibration.md) -- factory calibration and device info
 - [Capture](capture.md) -- binary capture format, reading, writing, and export
 - [High-Rate Capture](high-rate-capture.md) -- FIFO overrun troubleshooting and tuning

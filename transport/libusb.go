@@ -265,6 +265,11 @@ func (t *LibUSBTransport) NewBulkRing(endpoint uint8, bufSize, count, depth int,
 	return NewBulkRing(t.ctx, t.handle, endpoint, bufSize, count, depth, timeoutMs)
 }
 
+// NewBulkOutRing implements AsyncBulkWriter.
+func (t *LibUSBTransport) NewBulkOutRing(endpoint uint8, bufSize, count int, source BulkOutSource, timeoutMs uint) (BulkOutRing, error) {
+	return NewBulkOutRing(t.ctx, t.handle, endpoint, bufSize, count, source, timeoutMs)
+}
+
 // Close implements Transport.
 func (t *LibUSBTransport) Close() error {
 	t.mu.Lock()
