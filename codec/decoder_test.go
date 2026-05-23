@@ -38,13 +38,13 @@ func TestVoltage_AllRanges(t *testing.T) {
 	}{
 		{"BP10V midscale", device.ADCMidscale, device.BP10V, 0.0, 0.001},
 		{"BP10V zero", 0, device.BP10V, -10.0, 0.001},
-		{"BP10V max", device.ADCMaxCode, device.BP10V, 9.99992, 0.001},
+		{"BP10V max", device.ADCFullScale, device.BP10V, 9.99992, 0.001},
 		{"BP5V midscale", device.ADCMidscale, device.BP5V, 0.0, 0.001},
 		{"BP5V zero", 0, device.BP5V, -5.0, 0.001},
 		{"UP10V zero", 0, device.UP10V, 0.0, 0.001},
-		{"UP10V max", device.ADCMaxCode, device.UP10V, 10.0, 0.001},
+		{"UP10V max", device.ADCFullScale, device.UP10V, 10.0, 0.001},
 		{"UP5V zero", 0, device.UP5V, 0.0, 0.001},
-		{"UP5V max", device.ADCMaxCode, device.UP5V, 5.0, 0.001},
+		{"UP5V max", device.ADCFullScale, device.UP5V, 5.0, 0.001},
 	}
 
 	for _, tt := range tests {
@@ -197,7 +197,7 @@ func TestCalibration_ToVolts(t *testing.T) {
 	}{
 		{"BP10V midscale", device.ADCMidscale, device.BP10V, 0.0, 0.001},
 		{"BP10V zero", 0, device.BP10V, -10.0, 0.001},
-		{"UP10V max", device.ADCMaxCode, device.UP10V, 10.0, 0.001},
+		{"UP10V max", device.ADCFullScale, device.UP10V, 10.0, 0.001},
 	}
 
 	for _, tt := range tests {
@@ -211,7 +211,7 @@ func TestCalibration_ToVolts(t *testing.T) {
 }
 
 func FuzzCalibrate(f *testing.F) {
-	for _, raw := range []uint32{0, device.ADCMidscale, device.ADCMaxCode, 100000} {
+	for _, raw := range []uint32{0, device.ADCMidscale, device.ADCFullScale, 100000} {
 		for r := range 4 {
 			f.Add(raw, uint8(r), float32(1.0), float32(0.0))
 		}
@@ -255,7 +255,7 @@ func BenchmarkVoltage(b *testing.B) {
 
 	chunk := make([]byte, numFrames*numCh*4)
 	for i := range numFrames * numCh {
-		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCMaxCode+1)))
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCFullScale+1)))
 	}
 
 	b.ResetTimer()
@@ -294,7 +294,7 @@ func TestDecodeVoltages(t *testing.T) {
 	chunk := makeFrame(
 		device.ADCMidscale, 0,
 		0, device.ADCMidscale,
-		device.ADCMaxCode, device.ADCMaxCode,
+		device.ADCFullScale, device.ADCFullScale,
 	)
 
 	table := dec.DecodeVoltages(chunk)
@@ -337,7 +337,7 @@ func BenchmarkDecodeVoltages(b *testing.B) {
 
 	chunk := make([]byte, numFrames*numCh*4)
 	for i := range numFrames * numCh {
-		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCMaxCode+1)))
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCFullScale+1)))
 	}
 
 	b.ResetTimer()
@@ -363,7 +363,7 @@ func BenchmarkDecodeVoltagesInto(b *testing.B) {
 
 	chunk := make([]byte, numFrames*numCh*4)
 	for i := range numFrames * numCh {
-		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCMaxCode+1)))
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCFullScale+1)))
 	}
 	dst := make([]float64, numFrames*numCh)
 

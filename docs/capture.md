@@ -268,7 +268,7 @@ Use `export.WithRaw()` to include an additional `uint32` raw column per channel.
 
 Writes 32-bit IEEE float PCM. Analog channels are first converted to calibrated
 voltages, then each channel is normalized independently by dividing by its own
-peak absolute value. Non-analog channels are normalized by ADCMaxCode (2^18 - 1,
+peak absolute value. Non-analog channels are normalized by ADCFullScale (2^18 - 1,
 the 18-bit full-scale value). This makes WAV useful for visualization in audio editors, but it
 does not preserve absolute voltage levels or cross-channel amplitude ratios.
 The entire capture is buffered in memory for normalization, so this is best

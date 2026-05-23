@@ -160,7 +160,7 @@ func TestScanHandle_StartAndStop(t *testing.T) {
 
 	frameData := make([]byte, frameSize)
 	copy(frameData[0:4], wire.PutUint32LE(ADCMidscale))
-	copy(frameData[4:8], wire.PutUint32LE(ADCMaxCode))
+	copy(frameData[4:8], wire.PutUint32LE(ADCFullScale))
 
 	mt := &mockRingTransport{
 		results: []transport.RingResult{

@@ -702,8 +702,8 @@ func TestCalibrate_BP10V(t *testing.T) {
 		t.Errorf("zero: got %f, want -10.0", got)
 	}
 
-	got = calibrate(device.ADCMaxCode, ch)
-	want := (float64(device.ADCMaxCode) - device.ADCMidscale) * 10.0 / device.ADCMidscale
+	got = calibrate(device.ADCFullScale, ch)
+	want := (float64(device.ADCFullScale) - device.ADCMidscale) * 10.0 / device.ADCMidscale
 	if math.Abs(got-want) > 1e-6 {
 		t.Errorf("max: got %f, want %f", got, want)
 	}
@@ -1250,7 +1250,7 @@ func FuzzCaptureRaw(f *testing.F) {
 
 func FuzzCalibrate(f *testing.F) {
 	for _, rng := range []uint8{0, 1, 2, 3} {
-		for _, raw := range []uint32{0, 1, device.ADCMidscale, device.ADCMaxCode} {
+		for _, raw := range []uint32{0, 1, device.ADCMidscale, device.ADCFullScale} {
 			f.Add(raw, rng, float32(1.0), float32(0.0))
 			f.Add(raw, rng, float32(1.001), float32(5.0))
 		}

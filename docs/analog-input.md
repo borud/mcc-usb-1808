@@ -152,11 +152,11 @@ result to the voltage range:
 
 - Bipolar +/-10V: `(cal - ADCMidscale) * 10 / ADCMidscale`
 - Bipolar +/-5V: `(cal - ADCMidscale) * 5 / ADCMidscale`
-- Unipolar 0-10V: `cal * 10 / ADCMaxCode`
-- Unipolar 0-5V: `cal * 5 / ADCMaxCode`
+- Unipolar 0-10V: `cal * 10 / ADCFullScale`
+- Unipolar 0-5V: `cal * 5 / ADCFullScale`
 
-Where `ADCMidscale` = 2^17 (131072) and `ADCMaxCode` = 2^18 - 1 (262143).
-Unipolar values are clamped to `[0, ADCMaxCode]` before conversion.
+Where `ADCMidscale` = 2^17 (131072) and `ADCFullScale` = 2^18 - 1 (262143).
+Unipolar values are clamped to `[0, ADCFullScale]` before conversion.
 
 ### Overrun Handling
 
