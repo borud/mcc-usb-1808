@@ -57,12 +57,13 @@ func main() {
 	// per-frame I/O (like fmt.Printf) creates backpressure that stalls
 	// the USB readers, which causes the device FIFO to overrun.
 	nCh := len(channelConfig)
-	buf := make([]float64, decoder.MaxSamples())
 	voltages := make([]float64, 0, int(scanConfig.Count)*nCh)
 
 	for chunk := range scan.Chunks() {
-		nFrames := decoder.DecodeVoltages(chunk.Data, buf)
-		voltages = append(voltages, buf[:nFrames*nCh]...)
+		table := decoder.DecodeVoltages(chunk.Data)
+		for i := range table.Frames() {
+			voltages = append(voltages, table.Row(i)...)
+		}
 	}
 
 	if err := scan.Stop(); err != nil {

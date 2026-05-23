@@ -12,7 +12,6 @@
 // Create a Fanout, subscribe one or more consumers, then call Run:
 //
 //	handle, _ := dev.CreateScan(cfg)
-//	handle.Start()
 //
 //	fan := stream.NewFanout(handle.Chunks())
 //	disk := fan.Subscribe(stream.WithDepth(64))
@@ -21,16 +20,20 @@
 //
 //	// Disk writer goroutine
 //	go func() {
+//	    cw, _ := capture.NewWriter("./capture-dir", header)
+//	    defer cw.Close()
 //	    for chunk := range disk.Chunks() {
-//	        writer.WriteBulk(chunk)
-//	        disk.Release(chunk)
+//	        cw.WriteBulk(chunk.Data)
+//	        disk.Release(chunk.Data)
 //	    }
 //	}()
 //
+//	handle.Start()
+//
 //	// Live display goroutine
 //	for chunk := range live.Chunks() {
-//	    decode(chunk)
-//	    live.Release(chunk)
+//	    decode(chunk.Data)
+//	    live.Release(chunk.Data)
 //	}
 //
 // # Back-pressure and drops

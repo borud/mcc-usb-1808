@@ -282,7 +282,72 @@ func BenchmarkToVolts(b *testing.B) {
 	_ = sink
 }
 
+func TestDecodeVoltages(t *testing.T) {
+	cal := identityCal()
+	channels := []device.ChannelConfig{
+		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V},
+		{Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP5V},
+	}
+	dec, _ := NewDecoder(channels, cal)
+
+	// 3 frames, 2 channels.
+	chunk := makeFrame(
+		device.ADCMidscale, 0,
+		0, device.ADCMidscale,
+		device.ADCMaxCode, device.ADCMaxCode,
+	)
+
+	table := dec.DecodeVoltages(chunk)
+	if table.Frames() != 3 {
+		t.Fatalf("Frames() = %d, want 3", table.Frames())
+	}
+
+	// Frame 0: midscale BP10V → 0V, zero BP5V → -5V.
+	row := table.Row(0)
+	if math.Abs(row[0]) > 0.001 {
+		t.Errorf("frame 0 ch0 = %f, want ~0", row[0])
+	}
+	if math.Abs(row[1]+5.0) > 0.001 {
+		t.Errorf("frame 0 ch1 = %f, want ~-5", row[1])
+	}
+
+	// Frame 1: zero BP10V → -10V, midscale BP5V → 0V.
+	row = table.Row(1)
+	if math.Abs(row[0]+10.0) > 0.001 {
+		t.Errorf("frame 1 ch0 = %f, want ~-10", row[0])
+	}
+	if math.Abs(row[1]) > 0.001 {
+		t.Errorf("frame 1 ch1 = %f, want ~0", row[1])
+	}
+}
+
 func BenchmarkDecodeVoltages(b *testing.B) {
+	const numCh = 8
+	const numFrames = 1000
+
+	cal := identityCal()
+	channels := make([]device.ChannelConfig, numCh)
+	for i := range numCh {
+		channels[i] = device.ChannelConfig{
+			Index: i, Type: device.ChannelTypeAnalog,
+			Range: device.BP10V, Mode: device.SingleEnded,
+		}
+	}
+	dec, _ := NewDecoder(channels, cal)
+
+	chunk := make([]byte, numFrames*numCh*4)
+	for i := range numFrames * numCh {
+		binary.LittleEndian.PutUint32(chunk[i*4:], uint32(i%(device.ADCMaxCode+1)))
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		dec.DecodeVoltages(chunk)
+	}
+}
+
+func BenchmarkDecodeVoltagesInto(b *testing.B) {
 	const numCh = 8
 	const numFrames = 1000
 
@@ -305,7 +370,7 @@ func BenchmarkDecodeVoltages(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		dec.DecodeVoltages(chunk, dst)
+		dec.DecodeVoltagesInto(chunk, dst)
 	}
 }
 

@@ -30,6 +30,7 @@ Both models provide:
 - [Calibration](calibration.md) -- factory calibration and device info
 - [Capture](capture.md) -- binary capture format, reading, writing, and export
 - [High-Rate Capture](high-rate-capture.md) -- FIFO overrun troubleshooting and tuning
+- [Stream](stream.md) -- fan-out broadcasting to multiple consumers
 - [CLI Tool](cli.md) -- the `daq` command-line tool
 - [Errors](errors.md) -- sentinel errors reference
 
