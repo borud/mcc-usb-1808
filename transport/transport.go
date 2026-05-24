@@ -51,6 +51,41 @@ type AsyncBulkReader interface {
 	NewBulkRing(endpoint uint8, bufSize, count, depth int, timeoutMs uint) (BulkRing, error)
 }
 
+// BulkOutSource fills the next staging buffer with bytes to send.
+// Implementations return (n, nil) on progress, (n, io.EOF) when exhausted
+// (n may be 0), or (0, err) on fatal error. Returning (0, nil) signals
+// "no data yet" and is treated as backpressure — the ring retries.
+type BulkOutSource interface {
+	Fill(buf []byte) (n int, err error)
+}
+
+// BulkOutRingStats holds lifetime counters for a BulkOutRing.
+type BulkOutRingStats struct {
+	Submitted uint64
+	Completed uint64
+	BytesSent uint64
+}
+
+// BulkOutRing is the interface for an async bulk OUT transfer ring.
+type BulkOutRing interface {
+	// Done closes when the source returns io.EOF and all in-flight transfers
+	// have completed.
+	Done() <-chan struct{}
+	// Err returns any error from the source or libusb.
+	Err() error
+	// Stop cancels in-flight transfers and frees resources. Always call Stop
+	// when finished with the ring, even after Done closes.
+	Stop()
+	// Stats returns lifetime counters.
+	Stats() BulkOutRingStats
+}
+
+// AsyncBulkWriter is an optional interface that Transport implementations
+// can provide to support async bulk OUT transfer rings.
+type AsyncBulkWriter interface {
+	NewBulkOutRing(endpoint uint8, bufSize, count int, source BulkOutSource, timeoutMs uint) (BulkOutRing, error)
+}
+
 // DeviceInfo describes a discovered USB device before it is opened.
 type DeviceInfo struct {
 	VendorID  uint16

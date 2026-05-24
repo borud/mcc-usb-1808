@@ -54,6 +54,9 @@ const (
 // epBulkIn is the EP6 IN endpoint for analog input scan data.
 const epBulkIn = 0x86
 
+// epBulkOut is the EP2 OUT endpoint for analog output scan data.
+const epBulkOut = 0x02
+
 // Memory addresses.
 const (
 	memADCCalBase   = 0x7000
@@ -73,3 +76,14 @@ const ringTransferCount = 32
 
 // ringMaxStageSize is the maximum buffer size per async ring transfer.
 const ringMaxStageSize = 16 * 1024
+
+// aoutRingTransferCount is the number of async bulk OUT transfers in the ring.
+const aoutRingTransferCount = 32
+
+// aoutRingMaxStageSize is the maximum staging buffer size per async OUT ring
+// transfer. Kept at 16 KiB to stay within xHCI safe limits.
+const aoutRingMaxStageSize = 16 * 1024
+
+// maxAOutUnderrunsPerSecond is the safety valve: if this many underruns occur
+// within one second, the scan is terminated to avoid an infinite restart loop.
+const maxAOutUnderrunsPerSecond = 3
