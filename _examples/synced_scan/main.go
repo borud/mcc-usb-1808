@@ -1,6 +1,6 @@
 // synced_scan demonstrates simultaneous analog input and output using a shared
 // software trigger. DAC0 outputs a 1 kHz sine wave while AIn channels 0–3
-// record the response at 100 kS/s for 1 second.
+// record the response continuously at 100 kS/s until Ctrl+C.
 //
 // For hardware-synchronized operation (minimal phase skew), replace the
 // software trigger with an external pulse connected to the TRIG_IN pin,
@@ -10,20 +10,21 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"log/slog"
 	"math"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/borud/mcc-usb-1808/v4/codec"
 	"github.com/borud/mcc-usb-1808/v4/device"
 )
 
 const (
-	rate           = 100_000 // Hz
-	sineHz         = 1_000   // Hz
-	amplitude      = 5.0     // Volts peak
-	recordSeconds  = 1
+	rate      = 100_000 // Hz
+	sineHz    = 1_000   // Hz
+	amplitude = 5.0     // Volts peak
 )
 
 func main() {
@@ -60,7 +61,7 @@ func main() {
 
 	slog.Info("AOut running", "rate", rate, "sine_hz", sineHz)
 
-	// --- Configure AIn: record 4 channels for recordSeconds ---
+	// --- Configure AIn: record 4 channels continuously ---
 	ainChannels := []device.ChannelConfig{
 		{Index: 0, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
 		{Index: 1, Type: device.ChannelTypeAnalog, Range: device.BP10V, Mode: device.Differential},
@@ -70,7 +71,12 @@ func main() {
 	ainCfg := device.ScanConfig{
 		Channels: ainChannels,
 		Rate:     rate,
-		Count:    uint32(rate * recordSeconds),
+		Count:    0, // continuous until Stop
+	}
+
+	decoder, err := codec.NewDecoder(ainChannels, dev.CalibrationTable())
+	if err != nil {
+		log.Fatalf("NewDecoder: %v", err)
 	}
 
 	scan, err := dev.CreateScan(ainCfg)
@@ -81,29 +87,36 @@ func main() {
 		log.Fatalf("scan.Start: %v", err)
 	}
 
-	slog.Info("AIn running", "channels", len(ainChannels), "duration_s", recordSeconds)
+	slog.Info("AIn running", "channels", len(ainChannels))
 
-	// --- Drain AIn chunks ---
-	totalChunks := 0
-	totalBytes := 0
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(recordSeconds+5)*time.Second)
+	// Stop scan when SIGINT/SIGTERM arrives; this closes scan.Chunks().
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	go func() {
+		<-ctx.Done()
+		scan.Stop() //nolint:errcheck
+	}()
+
+	// --- Drain AIn chunks, pushing ~100 samples/sec to the viewer ---
+	// Stride is rate/100 + 1 (= 1001) so consecutive pushes step through
+	// the sine period, making the wave visible in the rolling window.
+	const pushStride = rate/100 + 1
+
+	v := NewViewer(2000)
+	go v.Run(ctx)
 
 	for chunk := range scan.Chunks() {
-		totalChunks++
-		totalBytes += len(chunk.Data)
-
-		select {
-		case <-ctx.Done():
-			log.Fatal("timed out waiting for scan to complete")
-		default:
+		table := decoder.DecodeVoltages(chunk.Data)
+		firstInChunk := pushStride - (chunk.FrameStart % pushStride)
+		if firstInChunk == pushStride {
+			firstInChunk = 0
+		}
+		for i := firstInChunk; i < table.Frames(); i += pushStride {
+			v.Push(table.Row(i)[0])
 		}
 	}
 
 	if err := scan.Err(); err != nil {
 		log.Fatalf("scan error: %v", err)
 	}
-
-	fmt.Printf("AI complete: %d chunks, %d bytes total\n", totalChunks, totalBytes)
-	slog.Info("synced_scan complete", "chunks", totalChunks, "bytes", totalBytes)
 }

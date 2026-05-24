@@ -209,11 +209,20 @@ func (h *AOutScanHandle) setErr(err error) {
 // runAOutLoop is the main goroutine for an AOut scan. It monitors for
 // natural completion, stop requests, and underruns.
 func (h *AOutScanHandle) runAOutLoop(ring transport.BulkOutRing, aw transport.AsyncBulkWriter) {
-	defer close(h.done)
-	defer func() { h.stopOnce.Do(func() { close(h.stop) }) }()
+	var wg sync.WaitGroup
+
+	// Close h.done only after all inner goroutines have exited so that
+	// Stop() cannot return while any goroutine still holds h.dev.mu.
+	defer func() {
+		h.stopOnce.Do(func() { close(h.stop) })
+		wg.Wait()
+		close(h.done)
+	}()
 
 	// Stop monitor: sends hardware stop command when stop is requested.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		<-h.stop
 		h.dev.mu.Lock()
 		_ = h.dev.transport.ControlOut(cmdAOutScanStop, 0, 0, nil)
@@ -223,7 +232,9 @@ func (h *AOutScanHandle) runAOutLoop(ring transport.BulkOutRing, aw transport.As
 	}()
 
 	// Status poller: signals underrun channel when AOutScanUnder bit is set.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for {
