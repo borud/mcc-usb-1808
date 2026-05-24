@@ -12,6 +12,20 @@ func Uint16sToBytes(samples []uint16) []byte {
 	return buf
 }
 
+// Uint16sToBytesInto encodes samples as little-endian pairs into dst.
+// It writes as many complete samples as fit and returns the byte count.
+func Uint16sToBytesInto(dst []byte, samples []uint16) int {
+	n := 0
+	for _, s := range samples {
+		if n+2 > len(dst) {
+			break
+		}
+		binary.LittleEndian.PutUint16(dst[n:], s)
+		n += 2
+	}
+	return n
+}
+
 // BytesToUint16s converts a little-endian byte slice to a slice of uint16
 // values. len(data) must be even; odd trailing bytes are ignored.
 func BytesToUint16s(data []byte) []uint16 {

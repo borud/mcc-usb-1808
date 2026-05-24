@@ -28,6 +28,40 @@ func TestUint16sToBytes(t *testing.T) {
 	}
 }
 
+func TestUint16sToBytesInto(t *testing.T) {
+	samples := []uint16{0x1234, 0x5678, 0xABCD}
+
+	// Exactly fits.
+	dst := make([]byte, 6)
+	n := Uint16sToBytesInto(dst, samples)
+	if n != 6 {
+		t.Fatalf("n = %d, want 6", n)
+	}
+	if dst[0] != 0x34 || dst[1] != 0x12 {
+		t.Errorf("sample 0: got 0x%02x%02x, want 0x3412", dst[1], dst[0])
+	}
+
+	// Partial: buf holds only 2 samples.
+	dst2 := make([]byte, 4)
+	n = Uint16sToBytesInto(dst2, samples)
+	if n != 4 {
+		t.Fatalf("n = %d, want 4", n)
+	}
+
+	// Buffer too small for even one sample.
+	dst3 := make([]byte, 1)
+	n = Uint16sToBytesInto(dst3, samples)
+	if n != 0 {
+		t.Fatalf("n = %d, want 0", n)
+	}
+
+	// Empty samples.
+	n = Uint16sToBytesInto(dst, nil)
+	if n != 0 {
+		t.Fatalf("n = %d, want 0 for nil samples", n)
+	}
+}
+
 func TestBytesToUint16s_OddLength(t *testing.T) {
 	// Odd byte ignored.
 	b := []byte{0x01, 0x00, 0xFF}

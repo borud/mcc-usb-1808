@@ -126,8 +126,61 @@ Calibration coefficients are read from EEPROM by `dev.Init()`.
   (`AOutScanUnder` bit), which may have latch-until-read behaviour — verify
   on your hardware.
 
+## Streaming with AOutWriter
+
+`AOutWriter` provides a `Write`-based API for continuous output. The caller
+pushes `[]uint16` chunks at its own pace; backpressure flows from the device
+FIFO through the bulk-OUT ring back to the calling goroutine.
+
+```go
+cfg := device.AOutScanConfig{
+    Channels: []int{0},
+    Rate:     100_000,
+    Count:    0, // continuous
+}
+
+w, err := dev.NewAOutWriter(cfg)
+if err != nil { ... }
+defer w.Close()
+
+if err := w.Start(); err != nil { ... }
+
+buf := make([]uint16, 2048)
+for {
+    n, err := readUint16LE(src, buf)  // e.g., from a file or synthesis
+    if n > 0 {
+        if _, werr := w.Write(buf[:n]); werr != nil { break }
+    }
+    if err != nil { break }
+}
+```
+
+`Close` signals end-of-stream and blocks until the device FIFO drains. `Abort`
+returns immediately and stops the scan asynchronously.
+
+### AOutWriter API
+
+| Method | Description |
+|--------|-------------|
+| `Start() error` | Arm the scan; begin consuming Write calls |
+| `Write([]uint16) (int, error)` | Stream samples; blocks under backpressure |
+| `Close() error` | Drain and stop; idempotent |
+| `Abort() error` | Cancel immediately; returns without waiting |
+| `Err() error` | Return any scan error |
+
+### Backpressure
+
+The ring has `DefaultAOutPipelineDepth` (32) URB slots, each targeting ~10 ms
+of data. `Write` blocks until a slot is free, so steady-state write rate matches
+device consumption. Callers that write faster than the device rate stall;
+callers that write slower cause underruns (handled by the Phase 1 underrun
+policy).
+
 ## See also
 
 - [`docs/scanning-pipeline.md`](scanning-pipeline.md) — pipeline architecture
+- [`docs/sync.md`](sync.md) — AI/AO synchronization guide
 - [`_examples/analog_out/main.go`](../_examples/analog_out/main.go) — single-shot ramp
 - [`_examples/play_waveform/main.go`](../_examples/play_waveform/main.go) — PlayOnce + Loop
+- [`_examples/stream_aout/main.go`](../_examples/stream_aout/main.go) — AOutWriter from file
+- [`_examples/synced_scan/main.go`](../_examples/synced_scan/main.go) — simultaneous AI + AO
