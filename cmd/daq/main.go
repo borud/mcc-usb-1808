@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/alecthomas/kong"
 	"github.com/borud/mcc-usb-1808/v4/device"
@@ -18,9 +20,8 @@ var (
 type cli struct {
 	LogLevel  string `help:"Log level (${enum})." default:"info" enum:"debug,info,warn,error"`
 	LogFormat string `help:"Log format (${enum})." default:"text" enum:"text,json"`
-	Model     string `help:"Force device model (1808,1808x)." default:"" enum:",1808,1808x"`
-	Bus       int    `help:"USB bus number (use with --addr to select device)." default:"-1"`
-	Addr      int    `help:"USB device address (use with --bus to select device)." default:"-1"`
+	Model  string `help:"Force device model (1808,1808x)." default:"" enum:",1808,1808x"`
+	Device string `help:"Select device by USB address (bus:addr, e.g. 1:5)." default:"" short:"d"`
 
 	List    listCmd    `cmd:"" help:"List connected devices."`
 	Info    infoCmd    `cmd:"" help:"Show device information."`
@@ -77,24 +78,38 @@ func setupLogger(level, format string) *slog.Logger {
 	return slog.New(handler)
 }
 
-func openDevice(app *cli) (*device.Device, error) {
-	var dev *device.Device
-	var err error
-
-	if app.Bus >= 0 && app.Addr >= 0 {
-		dev, err = device.OpenAt(uint8(app.Bus), uint8(app.Addr))
-	} else if app.Bus >= 0 || app.Addr >= 0 {
-		return nil, fmt.Errorf("--bus and --addr must be specified together")
-	} else {
-		switch app.Model {
-		case "1808":
-			dev, err = device.OpenModel(device.USB1808)
-		case "1808x":
-			dev, err = device.OpenModel(device.USB1808X)
-		default:
-			dev, err = device.Open()
-		}
+func parseDevice(s string) (bus, addr uint8, err error) {
+	busStr, addrStr, ok := strings.Cut(s, ":")
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid device address %q: expected bus:addr (e.g. 1:5)", s)
 	}
+	b, err := strconv.ParseUint(busStr, 10, 8)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid bus %q: %w", busStr, err)
+	}
+	a, err := strconv.ParseUint(addrStr, 10, 8)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid addr %q: %w", addrStr, err)
+	}
+	return uint8(b), uint8(a), nil
+}
+
+func openDevice(app *cli) (*device.Device, error) {
+	var opts []device.Option
+	switch {
+	case app.Device != "":
+		bus, addr, err := parseDevice(app.Device)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, device.AtAddress(bus, addr))
+	case app.Model == "1808":
+		opts = append(opts, device.WithModel(device.USB1808))
+	case app.Model == "1808x":
+		opts = append(opts, device.WithModel(device.USB1808X))
+	}
+
+	dev, err := device.Open(opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -30,8 +30,14 @@ type Device struct {
 	calAIn  CalibrationTable
 	calAOut [NumAOutChannels]Calibration
 
-	initialized    atomic.Bool
+	initialized     atomic.Bool
 	keepAOutOnClose bool
+
+	// Selection fields: set by WithModel / AtAddress, consumed once by Open.
+	selectModel  Model
+	selectBus    uint8
+	selectAddr   uint8
+	selectByAddr bool
 }
 
 // Info describes a discovered USB-1808/1808X device.
@@ -58,75 +64,74 @@ func Discover() ([]Info, error) {
 	return result, nil
 }
 
-// Open discovers and opens the first USB-1808 or USB-1808X device found.
+// WithModel selects the first device of the given model variant.
+func WithModel(m Model) Option {
+	return func(d *Device) { d.selectModel = m }
+}
+
+// AtAddress selects the device at the given USB bus and address.
+// Takes precedence over WithModel when both are provided.
+func AtAddress(bus, addr uint8) Option {
+	return func(d *Device) {
+		d.selectBus = bus
+		d.selectAddr = addr
+		d.selectByAddr = true
+	}
+}
+
+// Open opens a USB-1808 or USB-1808X device. Without selection options it
+// returns the first device found (USB-1808X preferred). Use AtAddress or
+// WithModel to narrow the selection.
 func Open(opts ...Option) (*Device, error) {
-	for _, pid := range []uint16{PID1808X, PID1808} {
-		t, err := transport.OpenLibUSB(VendorID, pid)
+	d := &Device{log: slog.Default()}
+	for _, opt := range opts {
+		opt(d)
+	}
+
+	switch {
+	case d.selectByAddr:
+		infos, err := Discover()
 		if err != nil {
-			continue
+			return nil, err
 		}
-		d := &Device{
-			transport: t,
-			model:     Model(pid),
-			log:       slog.Default(),
+		found := false
+		for _, info := range infos {
+			if info.Bus == d.selectBus && info.Address == d.selectAddr {
+				d.model = info.Model
+				found = true
+				break
+			}
 		}
-		for _, opt := range opts {
-			opt(d)
+		if !found {
+			return nil, fmt.Errorf("%w: no device at bus %d address %d", ErrDeviceNotFound, d.selectBus, d.selectAddr)
 		}
-		return d, nil
-	}
-	return nil, ErrDeviceNotFound
-}
+		t, err := transport.OpenLibUSBAt(VendorID, d.selectBus, d.selectAddr)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrDeviceNotFound, err)
+		}
+		d.transport = t
 
-// OpenModel opens a specific model variant.
-func OpenModel(model Model, opts ...Option) (*Device, error) {
-	t, err := transport.OpenLibUSB(VendorID, uint16(model))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrDeviceNotFound, err)
-	}
-	d := &Device{
-		transport: t,
-		model:     model,
-		log:       slog.Default(),
-	}
-	for _, opt := range opts {
-		opt(d)
-	}
-	return d, nil
-}
-
-// OpenAt opens the device at the given USB bus and address.
-func OpenAt(bus, addr uint8, opts ...Option) (*Device, error) {
-	// Discover to determine the model at this location.
-	infos, err := Discover()
-	if err != nil {
-		return nil, err
-	}
-	var model Model
-	found := false
-	for _, info := range infos {
-		if info.Bus == bus && info.Address == addr {
-			model = info.Model
-			found = true
-			break
+	case d.selectModel != 0:
+		t, err := transport.OpenLibUSB(VendorID, uint16(d.selectModel))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrDeviceNotFound, err)
 		}
-	}
-	if !found {
-		return nil, fmt.Errorf("%w: no device at bus %d address %d", ErrDeviceNotFound, bus, addr)
+		d.transport = t
+		d.model = d.selectModel
+
+	default:
+		for _, pid := range []uint16{PID1808X, PID1808} {
+			t, err := transport.OpenLibUSB(VendorID, pid)
+			if err != nil {
+				continue
+			}
+			d.transport = t
+			d.model = Model(pid)
+			return d, nil
+		}
+		return nil, ErrDeviceNotFound
 	}
 
-	t, err := transport.OpenLibUSBAt(VendorID, bus, addr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrDeviceNotFound, err)
-	}
-	d := &Device{
-		transport: t,
-		model:     model,
-		log:       slog.Default(),
-	}
-	for _, opt := range opts {
-		opt(d)
-	}
 	return d, nil
 }
 
