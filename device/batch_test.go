@@ -25,7 +25,16 @@ func TestRingStageSize_Invariants(t *testing.T) {
 				t.Errorf("rate=%.0f nCh=%d: size=%d > ringMaxStageSize=%d",
 					rate, nCh, size, ringMaxStageSize)
 			}
-			if size >= MaxPacketSize && MaxPacketSize%bytesPerScan == 0 && size%MaxPacketSize != 0 {
+			// Packet alignment must hold for ALL channel counts. The
+			// device delivers data in MaxPacketSize chunks; a buffer
+			// whose size isn't a multiple of MaxPacketSize lets a
+			// full final packet spill past the end of the transfer
+			// and fire LIBUSB_TRANSFER_OVERFLOW. The previous
+			// guard ("only check when MaxPacketSize divides
+			// bytesPerScan") was wrong because the actual USB
+			// requirement is MaxPacketSize alignment, not the
+			// other direction.
+			if size >= MaxPacketSize && size%MaxPacketSize != 0 {
 				t.Errorf("rate=%.0f nCh=%d: size=%d not aligned to MaxPacketSize=%d",
 					rate, nCh, size, MaxPacketSize)
 			}
@@ -63,7 +72,7 @@ func FuzzRingStageSize(f *testing.F) {
 			t.Errorf("rate=%g nCh=%d: size=%d > ringMaxStageSize=%d",
 				rate, nCh, size, ringMaxStageSize)
 		}
-		if size >= MaxPacketSize && MaxPacketSize%bytesPerScan == 0 && size%MaxPacketSize != 0 {
+		if size >= MaxPacketSize && size%MaxPacketSize != 0 {
 			t.Errorf("rate=%g nCh=%d: size=%d not aligned to MaxPacketSize",
 				rate, nCh, size)
 		}

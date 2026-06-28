@@ -412,22 +412,47 @@ func (h *ScanHandle) restartScan() (transport.BulkRing, error) {
 }
 
 // ringStageSize computes the buffer size in bytes for each async ring transfer.
-// Targets ~10ms of data, aligned to MaxPacketSize, capped at ringMaxStageSize.
+// Targets ~10ms of data, aligned to lcm(bytesPerScan, MaxPacketSize), capped at
+// ringMaxStageSize.
+//
+// The double alignment matters: the buffer must hold a whole number of
+// scans (so the consumer sees only complete frames) AND a whole number
+// of USB max-size packets (so a full 512-byte packet at the buffer
+// boundary doesn't spill past the end of the libusb transfer and fire
+// LIBUSB_TRANSFER_OVERFLOW). Aligning to lcm satisfies both. For
+// nChannels in {1,2,4,8} bytesPerScan already divides MaxPacketSize, so
+// lcm == MaxPacketSize and behavior matches the old code; for
+// nChannels in {3,5,6,7} the old "align to MaxPacketSize, then truncate
+// to a multiple of bytesPerScan" sequence produced a buffer that was
+// not a multiple of MaxPacketSize and overflowed mid-transfer.
 func ringStageSize(rate float64, nChannels int) int {
 	// 10ms of data (in scans)
 	n := max(int(rate*0.01), 1)
 
 	bytesPerScan := nChannels * 4
+	unit := lcmInt(bytesPerScan, MaxPacketSize)
+
 	totalBytes := min(n*bytesPerScan, ringMaxStageSize)
-
-	if totalBytes >= MaxPacketSize {
-		totalBytes = (totalBytes / MaxPacketSize) * MaxPacketSize
+	totalBytes = (totalBytes / unit) * unit
+	if totalBytes < unit {
+		totalBytes = unit
 	}
-
-	if totalBytes < MaxPacketSize {
-		totalBytes = MaxPacketSize
-	}
-
-	totalBytes = max((totalBytes/bytesPerScan)*bytesPerScan, bytesPerScan)
 	return totalBytes
+}
+
+func gcdInt(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a < 0 {
+		return -a
+	}
+	return a
+}
+
+func lcmInt(a, b int) int {
+	if a == 0 || b == 0 {
+		return 0
+	}
+	return a / gcdInt(a, b) * b
 }
